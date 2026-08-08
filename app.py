@@ -336,7 +336,11 @@ def main():
         
         st.markdown("---")
         all_elements = sorted([el for el in ELEMENT_DB.keys() if el != "O"])
-        forbidden_elements = st.multiselect("🛑 Exclure Éléments", all_elements, default=["Li", "Na", "K", "Rb", "Cs"])
+        
+        # On filtre les valeurs par défaut pour s'assurer qu'elles existent bien dans all_elements
+        default_forbidden = [el for el in ["Li", "Na", "K", "Rb", "Cs"] if el in all_elements]
+        
+        forbidden_elements = st.multiselect("🛑 Exclure Éléments", all_elements, default=default_forbidden)
         
         st.markdown("---")
         generate_btn = st.button("🚀 LANCER LE CRIBLAGE EXPERT", type="primary", use_container_width=True)
