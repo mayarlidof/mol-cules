@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 =============================================================================
- HIGH-THROUGHPUT MATERIAL SCREENING ENGINE - A2BB'O6 | V4.0 PRODUCTION-GRADE
- Inclus : QE .scf.in, Indice de distorsion & Ordre B/B', Descripteurs ML/DeepXDE
+ HIGH-THROUGHPUT MATERIAL SCREENING ENGINE - A2BB'O6 | V5.0 PRODUCTION-GRADE
+ Inclus : Dynamique UI, QE .scf.in, Ordre B/B', Descripteurs ML/DeepXDE
 =============================================================================
 """
 
@@ -21,7 +21,7 @@ from typing import Dict, Optional
 # ==============================================================================
 ELEMENT_DB = {
     "O":  {"radii": {-2: {2: 1.35, 3: 1.36, 4: 1.38, 6: 1.40, 8: 1.42, 12: 1.44}}, "chi_pauling": 3.44, "group": 16, "mass": 15.999},
-    # Site A (Lanthanides, Alcalino-terreux)
+    # Site A
     "Ca": {"radii": {2: {6: 1.00, 8: 1.12, 12: 1.34}}, "chi_pauling": 1.00, "group": 2, "mass": 40.078},
     "Sr": {"radii": {2: {6: 1.18, 8: 1.26, 12: 1.44}}, "chi_pauling": 0.95, "group": 2, "mass": 87.62},
     "Ba": {"radii": {2: {6: 1.35, 8: 1.42, 12: 1.61}}, "chi_pauling": 0.89, "group": 2, "mass": 137.327},
@@ -32,7 +32,7 @@ ELEMENT_DB = {
     "Nd": {"radii": {3: {6: 0.983, 8: 1.109, 12: 1.31}}, "chi_pauling": 1.14, "group": 3, "mass": 144.242},
     "Sm": {"radii": {3: {6: 0.958, 8: 1.079, 12: 1.28}}, "chi_pauling": 1.17, "group": 3, "mass": 150.36},
     "Bi": {"radii": {3: {6: 1.03, 8: 1.17, 12: 1.38}}, "chi_pauling": 2.02, "group": 15, "mass": 208.980},
-    # Sites B et B' (TM, Post-TM)
+    # Sites B et B'
     "Sc": {"radii": {3: {6: 0.745}}, "chi_pauling": 1.36, "group": 3, "mass": 44.956},
     "Ti": {"radii": {3: {6: 0.67}, 4: {6: 0.605}}, "chi_pauling": 1.54, "group": 4, "mass": 47.867},
     "V":  {"radii": {3: {6: 0.64}, 4: {6: 0.58}, 5: {6: 0.54}}, "chi_pauling": 1.63, "group": 5, "mass": 50.941},
@@ -61,17 +61,17 @@ ELEMENT_DB = {
 }
 
 # ==============================================================================
-# 2. CONFIGURATION DYNAMIQUE DES STRUCTURES
+# 2. CONFIGURATION DYNAMIQUE DES STRUCTURES AVEC PARAMÈTRES PAR DÉFAUT
 # ==============================================================================
 STRUCTURE_CONFIG = {
     "Double Pérovskite": {
-        "Cubique (Fm-3m)": {"sg": "Fm-3m", "cn_A": 12, "lattice": "cubic"},
-        "Tétragonale (I4/m)": {"sg": "I4/m", "cn_A": 8, "lattice": "tetra"},
-        "Orthorhombique (Pnma)": {"sg": "Pnma", "cn_A": 8, "lattice": "ortho"},
-        "Monoclinique (P2_1/n)": {"sg": "P2_1/n", "cn_A": 8, "lattice": "mono"}
+        "Cubique (Fm-3m)": {"sg": "Fm-3m", "cn_A": 12, "lattice": "cubic", "default_a": 8.0, "default_delta_a": 0.5},
+        "Tétragonale (I4/m)": {"sg": "I4/m", "cn_A": 8, "lattice": "tetra", "default_a": 5.6, "default_delta_a": 0.5},
+        "Orthorhombique (Pnma)": {"sg": "Pnma", "cn_A": 8, "lattice": "ortho", "default_a": 5.5, "default_delta_a": 0.3},
+        "Monoclinique (P2_1/n)": {"sg": "P2_1/n", "cn_A": 8, "lattice": "mono", "default_a": 5.5, "default_delta_a": 0.3}
     },
     "Corindon / Ilménite": {
-        "Rhomboédrique (R-3)": {"sg": "R-3", "cn_A": 6, "lattice": "hexagonal"}
+        "Rhomboédrique (R-3)": {"sg": "R-3", "cn_A": 6, "lattice": "hexagonal", "default_a": 5.0, "default_delta_a": 0.3}
     }
 }
 
@@ -99,7 +99,6 @@ class HTEngine:
         df_A = pd.DataFrame(cations_A, columns=['el_A', 'ox_A', 'r_A', 'chi_A', 'grp_A', 'mass_A'])
         df_B = pd.DataFrame(cations_B, columns=['el_B', 'ox_B', 'r_B', 'chi_B', 'grp_B', 'mass_B'])
         
-        # FIX ROBUSTE : Renommage explicite avant le Cross Join pour éviter le KeyError de suffixe Pandas
         df_B_left = df_B.copy()
         df_B_right = df_B.rename(columns={
             'el_B': 'el_Bp', 'ox_B': 'ox_Bp', 'r_B': 'r_Bp', 
@@ -112,7 +111,6 @@ class HTEngine:
         df_BxB = pd.merge(df_B_left, df_B_right, on='key')
         df_BxB = df_BxB[df_BxB['el_B'] < df_BxB['el_Bp']]
         
-        # Neutralité de charge
         df_BxB['req_2_ox_A'] = 12 - (df_BxB['ox_B'] + df_BxB['ox_Bp'])
         df_BxB = df_BxB[(df_BxB['req_2_ox_A'] > 0) & (df_BxB['req_2_ox_A'] % 2 == 0)]
         df_BxB['req_ox_A'] = df_BxB['req_2_ox_A'] / 2
@@ -122,21 +120,16 @@ class HTEngine:
         
         r_B_eff = (df_comb['r_B'] + df_comb['r_Bp']) / 2.0
         
-        # Tolérance & Filtres
         df_comb['t'] = (df_comb['r_A'] + r_O) / (np.sqrt(2) * (r_B_eff + r_O))
         df_comb = df_comb[(df_comb['t'] >= t_min) & (df_comb['t'] <= t_max)]
         
         df_comb['delta_chi'] = np.abs(df_comb['chi_B'] - df_comb['chi_Bp'])
         df_comb = df_comb[df_comb['delta_chi'] <= max_delta_chi]
         
-        # Calculs Avancés : Indice de distorsion, différence de rayon et de charge (Ordre B/B')
         delta_r_BBp = np.abs(df_comb['r_B'] - df_comb['r_Bp'])
         delta_z_BBp = np.abs(df_comb['ox_B'] - df_comb['ox_Bp'])
-        
-        # Propensité à l'ordre B/B' (Score d'ordre empirique basé sur Δr et Δz)
         df_comb['order_propensity'] = (0.5 * (delta_r_BBp / 0.15) + 0.5 * (delta_z_BBp / 2.0)).clip(0.0, 1.0)
         
-        # Paramètres de maille
         a_A = np.sqrt(2) * (df_comb['r_A'] + r_O)
         a_B = 2 * (r_B_eff + r_O) * np.sqrt(2)
         df_comb['a_c'] = (a_A + a_B) / 2.0
@@ -169,18 +162,15 @@ class HTEngine:
 
         df_comb = df_comb[np.abs(df_comb['a_calc'] - target_a) <= delta_a]
         
-        # Thermodynamique & Stabilité combinée avec la propension à l'ordre
         mu = r_B_eff / r_O
         score_t = np.exp(-5.0 * np.abs(1.0 - df_comb['t']))
         score_mu = np.exp(-5.0 * np.abs(0.85 - mu))
         df_comb['stability_score'] = (0.7 * (score_t * score_mu) + 0.3 * df_comb['order_propensity']).round(3)
         
-        # Formule et descripteurs ML/DeepXDE
         df_comb['Formule'] = df_comb['el_A'] + '2' + df_comb['el_B'] + df_comb['el_Bp'] + 'O6'
         df_comb['d_e(B)'] = np.clip(df_comb['grp_B'] - df_comb['ox_B'], 0, 10)
         df_comb['d_e(Bp)'] = np.clip(df_comb['grp_Bp'] - df_comb['ox_Bp'], 0, 10)
         
-        # FIX : Accès correct à la masse et chi de l'oxygène
         mass_O = ELEMENT_DB['O']['mass']
         chi_O = ELEMENT_DB['O']['chi_pauling']
         df_comb['mean_atomic_mass'] = (2 * df_comb['mass_A'] + df_comb['mass_B'] + df_comb['mass_Bp'] + 6 * mass_O) / 10.0
@@ -197,7 +187,7 @@ class HTEngine:
         return df_final.reset_index(drop=True)
 
 # ==============================================================================
-# 4. GÉNÉRATEURS DE FICHIERS EXPERTS (CIF, POSCAR, QUANTUM ESPRESSO .IN)
+# 4. GÉNÉRATEURS DE FICHIERS EXPERTS
 # ==============================================================================
 def generate_cif(row: pd.Series, sg: str) -> str:
     formula = row['Formule']
@@ -264,7 +254,6 @@ def generate_qe_input(row: pd.Series) -> str:
     beta_rad = np.deg2rad(beta)
     ax, bx, by = a, 0.0, b
     cx, cy, cz = c * np.cos(beta_rad), 0.0, c * np.sin(beta_rad)
-    
     el_A, el_B, el_Bp = row['el_A'], row['el_B'], row['el_Bp']
     
     return f"""&control
@@ -317,7 +306,7 @@ K_POINTS automatic
 # 5. INTERFACE UTILISATEUR (STREAMLIT UI/UX)
 # ==============================================================================
 def main():
-    st.set_page_config(page_title="⚛️ HTS A2BB'O6 Production V4", layout="wide", initial_sidebar_state="expanded")
+    st.set_page_config(page_title="⚛️ HTS A2BB'O6 Production V5", layout="wide", initial_sidebar_state="expanded")
     st.markdown("<style> .stApp { background-color: #0e1117; color: #fafafa; } .stButton>button { border-radius: 8px; transition: all 0.3s ease; } .stButton>button:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.3); } </style>", unsafe_allow_html=True)
     
     st.title("⚛️ Production-Grade HTS A₂BB'O6 Engine & ML Toolkit")
@@ -334,8 +323,23 @@ def main():
         
         st.markdown("---")
         st.subheader("📏 Cible Paramètre de Maille (a)")
-        target_a = st.number_input("Valeur cible 'a' (Å)", min_value=3.0, max_value=20.0, value=5.5 if config['lattice']=='cubic' else 7.8, step=0.05)
-        delta_a = st.slider("Marge ±Δa (Å)", 0.01, 1.0, 0.2, step=0.01)
+        
+        # LOGIQUE DYNAMIQUE : Mise à jour intelligente des paramètres par défaut
+        if 'last_struct_family' not in st.session_state:
+            st.session_state.last_struct_family = struct_family
+            
+        if st.session_state.last_struct_family != struct_family:
+            st.session_state.target_a = config['default_a']
+            st.session_state.delta_a = config['default_delta_a']
+            st.session_state.last_struct_family = struct_family
+            
+        if 'target_a' not in st.session_state:
+            st.session_state.target_a = config['default_a']
+        if 'delta_a' not in st.session_state:
+            st.session_state.delta_a = config['default_delta_a']
+            
+        target_a = st.number_input("Valeur cible 'a' (Å)", min_value=3.0, max_value=20.0, value=st.session_state.target_a, step=0.05, key='target_a')
+        delta_a = st.slider("Marge ±Δa (Å)", 0.01, 2.0, value=st.session_state.delta_a, step=0.01, key='delta_a', help="Ajusté automatiquement au changement de structure.")
         
         st.markdown("---")
         st.subheader("🧪 Filtres Physico-Chimiques & Ordre")
@@ -436,7 +440,6 @@ def main():
             
             st.dataframe(df_ml, use_container_width=True, hide_index=True)
             
-            # FIX : Correction de l'export CSV (index=False au lieu de index=abs(0))
             csv_data = df_ml.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="⬇️ Télécharger le jeu de données des descripteurs (CSV pour ML / DeepXDE)",
@@ -465,7 +468,7 @@ def main():
             
     elif "df_results" in st.session_state and st.session_state.df_results.empty:
         st.error("❌ Aucune combinaison ne satisfait vos critères stricts de stabilité et de géométrie.")
-        st.info("💡 **Conseils d'expert :**\n1. Baissez le score minimal à 0.3 pour élargir la recherche.\n2. Ajustez la cible 'a' selon la famille symétrique choisie.")
+        st.info("💡 **Conseils d'expert :**\n1. Le paramètre de maille par défaut s'ajuste automatiquement. Vérifiez vos filtres.\n2. Baissez le score minimal à 0.2 pour élargir la recherche aux métastables.\n3. Augmentez la marge ±Δa.")
 
 if __name__ == "__main__":
     main()
