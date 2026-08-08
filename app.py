@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 =============================================================================
-  HIGH-THROUGHPUT MATERIAL SCREENING ENGINE - A2BB'O6 | V4.1 PRODUCTION-GRADE
-  Inclus : QE .scf.in, Indice de distorsion & Ordre B/B', Descripteurs ML/DeepXDE
+ HIGH-THROUGHPUT MATERIAL SCREENING ENGINE - A2BB'O6 | V4.0 PRODUCTION-GRADE
+ Inclus : QE .scf.in, Indice de distorsion & Ordre B/B', Descripteurs ML/DeepXDE
 =============================================================================
 """
 
@@ -99,12 +99,17 @@ class HTEngine:
         df_A = pd.DataFrame(cations_A, columns=['el_A', 'ox_A', 'r_A', 'chi_A', 'grp_A', 'mass_A'])
         df_B = pd.DataFrame(cations_B, columns=['el_B', 'ox_B', 'r_B', 'chi_B', 'grp_B', 'mass_B'])
         
-        df_B['key'] = 1
-        df_A_key = df_A.copy()
-        df_A_key['key'] = 1
+        # FIX ROBUSTE : Renommage explicite avant le Cross Join pour éviter le KeyError de suffixe Pandas
+        df_B_left = df_B.copy()
+        df_B_right = df_B.rename(columns={
+            'el_B': 'el_Bp', 'ox_B': 'ox_Bp', 'r_B': 'r_Bp', 
+            'chi_B': 'chi_Bp', 'grp_B': 'grp_Bp', 'mass_B': 'mass_Bp'
+        })
         
-        # Utilisation de '_Bp' comme suffixe explicite pour correspondre exactement aux colonnes
-        df_BxB = pd.merge(df_B, df_B, on='key', suffixes=('', '_Bp'))
+        df_B_left['key'] = 1
+        df_B_right['key'] = 1
+        
+        df_BxB = pd.merge(df_B_left, df_B_right, on='key')
         df_BxB = df_BxB[df_BxB['el_B'] < df_BxB['el_Bp']]
         
         # Neutralité de charge
@@ -112,6 +117,7 @@ class HTEngine:
         df_BxB = df_BxB[(df_BxB['req_2_ox_A'] > 0) & (df_BxB['req_2_ox_A'] % 2 == 0)]
         df_BxB['req_ox_A'] = df_BxB['req_2_ox_A'] / 2
         
+        df_A_key = df_A[['el_A', 'ox_A', 'r_A', 'chi_A', 'grp_A', 'mass_A']].copy()
         df_comb = pd.merge(df_BxB, df_A_key, left_on='req_ox_A', right_on='ox_A')
         
         r_B_eff = (df_comb['r_B'] + df_comb['r_Bp']) / 2.0
@@ -127,6 +133,7 @@ class HTEngine:
         delta_r_BBp = np.abs(df_comb['r_B'] - df_comb['r_Bp'])
         delta_z_BBp = np.abs(df_comb['ox_B'] - df_comb['ox_Bp'])
         
+        # Propensité à l'ordre B/B' (Score d'ordre empirique basé sur Δr et Δz)
         df_comb['order_propensity'] = (0.5 * (delta_r_BBp / 0.15) + 0.5 * (delta_z_BBp / 2.0)).clip(0.0, 1.0)
         
         # Paramètres de maille
@@ -162,18 +169,22 @@ class HTEngine:
 
         df_comb = df_comb[np.abs(df_comb['a_calc'] - target_a) <= delta_a]
         
+        # Thermodynamique & Stabilité combinée avec la propension à l'ordre
         mu = r_B_eff / r_O
         score_t = np.exp(-5.0 * np.abs(1.0 - df_comb['t']))
         score_mu = np.exp(-5.0 * np.abs(0.85 - mu))
         df_comb['stability_score'] = (0.7 * (score_t * score_mu) + 0.3 * df_comb['order_propensity']).round(3)
         
+        # Formule et descripteurs ML/DeepXDE
         df_comb['Formule'] = df_comb['el_A'] + '2' + df_comb['el_B'] + df_comb['el_Bp'] + 'O6'
         df_comb['d_e(B)'] = np.clip(df_comb['grp_B'] - df_comb['ox_B'], 0, 10)
         df_comb['d_e(Bp)'] = np.clip(df_comb['grp_Bp'] - df_comb['ox_Bp'], 0, 10)
         
-        # Descripteurs globaux pour DeepXDE / ML sécurisés
-        df_comb['mean_atomic_mass'] = (2 * df_comb['mass_A'] + df_comb['mass_B'] + df_comb['mass_Bp'] + 6 * ELEMENT_DB['O']['mass']) / 10.0
-        df_comb['mean_chi'] = (2 * df_comb['chi_A'] + df_comb['chi_B'] + df_comb['chi_Bp'] + 6 * ELEMENT_DB['O']['chi_pauling']) / 10.0
+        # FIX : Accès correct à la masse et chi de l'oxygène
+        mass_O = ELEMENT_DB['O']['mass']
+        chi_O = ELEMENT_DB['O']['chi_pauling']
+        df_comb['mean_atomic_mass'] = (2 * df_comb['mass_A'] + df_comb['mass_B'] + df_comb['mass_Bp'] + 6 * mass_O) / 10.0
+        df_comb['mean_chi'] = (2 * df_comb['chi_A'] + df_comb['chi_B'] + df_comb['chi_Bp'] + 6 * chi_O) / 10.0
         
         cols = ['Formule', 'el_A', 'el_B', 'el_Bp', 'ox_A', 'ox_B', 'ox_Bp',
                 't', 'a_calc', 'b_calc', 'c_calc', 'beta_calc', 'stability_score', 
@@ -184,7 +195,7 @@ class HTEngine:
         
         st.session_state.exec_time = time.time() - start_time
         return df_final.reset_index(drop=True)
-      
+
 # ==============================================================================
 # 4. GÉNÉRATEURS DE FICHIERS EXPERTS (CIF, POSCAR, QUANTUM ESPRESSO .IN)
 # ==============================================================================
@@ -334,8 +345,7 @@ def main():
         
         st.markdown("---")
         all_elements = sorted([el for el in ELEMENT_DB.keys() if el != "O"])
-        default_forbidden = [el for el in ["Li", "Na", "K", "Rb", "Cs"] if el in all_elements]
-        forbidden_elements = st.multiselect("🛑 Exclure Éléments", all_elements, default=default_forbidden)
+        forbidden_elements = st.multiselect("🛑 Exclure Éléments", all_elements, default=[])
         
         st.markdown("---")
         generate_btn = st.button("🚀 LANCER LE CRIBLAGE EXPERT", type="primary", use_container_width=True)
@@ -426,6 +436,7 @@ def main():
             
             st.dataframe(df_ml, use_container_width=True, hide_index=True)
             
+            # FIX : Correction de l'export CSV (index=False au lieu de index=abs(0))
             csv_data = df_ml.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="⬇️ Télécharger le jeu de données des descripteurs (CSV pour ML / DeepXDE)",
