@@ -103,7 +103,8 @@ class HTEngine:
         df_A_key = df_A.copy()
         df_A_key['key'] = 1
         
-        df_BxB = pd.merge(df_B, df_B, on='key', suffixes=('', '_Bp'))
+        # Utilisation d'un suffixe explicite '_p' pour éviter les conflits
+        df_BxB = pd.merge(df_B, df_B, on='key', suffixes=('', '_p'))
         df_BxB = df_BxB[df_BxB['el_B'] < df_BxB['el_Bp']]
         
         # Neutralité de charge
@@ -170,9 +171,9 @@ class HTEngine:
         df_comb['d_e(B)'] = np.clip(df_comb['grp_B'] - df_comb['ox_B'], 0, 10)
         df_comb['d_e(Bp)'] = np.clip(df_comb['grp_Bp'] - df_comb['ox_Bp'], 0, 10)
         
-        # Descripteurs globaux pour DeepXDE / ML
-        df_comb['mean_atomic_mass'] = (2 * df_comb['mass_A'] + df_comb['mass_B'] + df_comb['mass_Bp'] + 6 * ELEMENT_DB['mass']) / 10.0
-        df_comb['mean_chi'] = (2 * df_comb['chi_A'] + df_comb['chi_B'] + df_comb['chi_Bp'] + 6 * ELEMENT_DB['chi_pauling']) / 10.0
+        # Descripteurs globaux pour DeepXDE / ML sécurisés
+        df_comb['mean_atomic_mass'] = (2 * df_comb['mass_A'] + df_comb['mass_B'] + df_comb['mass_Bp'] + 6 * ELEMENT_DB['O']['mass']) / 10.0
+        df_comb['mean_chi'] = (2 * df_comb['chi_A'] + df_comb['chi_B'] + df_comb['chi_Bp'] + 6 * ELEMENT_DB['O']['chi_pauling']) / 10.0
         
         cols = ['Formule', 'el_A', 'el_B', 'el_Bp', 'ox_A', 'ox_B', 'ox_Bp',
                 't', 'a_calc', 'b_calc', 'c_calc', 'beta_calc', 'stability_score', 
@@ -183,7 +184,6 @@ class HTEngine:
         
         st.session_state.exec_time = time.time() - start_time
         return df_final.reset_index(drop=True)
-
 # ==============================================================================
 # 4. GÉNÉRATEURS DE FICHIERS EXPERTS (CIF, POSCAR, QUANTUM ESPRESSO .IN)
 # ==============================================================================
