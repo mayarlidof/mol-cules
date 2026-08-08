@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 =============================================================================
- HIGH-THROUGHPUT MATERIAL SCREENING ENGINE - A2BB'O6 | V4.0 PRODUCTION-GRADE
- Inclus : QE .scf.in, Indice de distorsion & Ordre B/B', Descripteurs ML/DeepXDE
+  HIGH-THROUGHPUT MATERIAL SCREENING ENGINE - A2BB'O6 | V4.1 PRODUCTION-GRADE
+  Inclus : QE .scf.in, Indice de distorsion & Ordre B/B', Descripteurs ML/DeepXDE
 =============================================================================
 """
 
@@ -100,10 +100,10 @@ class HTEngine:
         df_B = pd.DataFrame(cations_B, columns=['el_B', 'ox_B', 'r_B', 'chi_B', 'grp_B', 'mass_B'])
         
         df_B['key'] = 1
-        df_A_key = df_A[['el_A', 'ox_A', 'r_A', 'chi_A', 'grp_A', 'mass_A']].copy()
+        df_A_key = df_A.copy()
         df_A_key['key'] = 1
         
-        df_BxB = pd.merge(df_B, df_B, on='key', suffixes=('', 'p'))
+        df_BxB = pd.merge(df_B, df_B, on='key', suffixes=('', '_Bp'))
         df_BxB = df_BxB[df_BxB['el_B'] < df_BxB['el_Bp']]
         
         # Neutralité de charge
@@ -126,7 +126,6 @@ class HTEngine:
         delta_r_BBp = np.abs(df_comb['r_B'] - df_comb['r_Bp'])
         delta_z_BBp = np.abs(df_comb['ox_B'] - df_comb['ox_Bp'])
         
-        # Propriensité à l'ordre B/B' (Score d'ordre empirique basé sur Δr et Δz)
         df_comb['order_propensity'] = (0.5 * (delta_r_BBp / 0.15) + 0.5 * (delta_z_BBp / 2.0)).clip(0.0, 1.0)
         
         # Paramètres de maille
@@ -162,13 +161,11 @@ class HTEngine:
 
         df_comb = df_comb[np.abs(df_comb['a_calc'] - target_a) <= delta_a]
         
-        # Thermodynamique & Stabilité combinée avec la propension à l'ordre
         mu = r_B_eff / r_O
         score_t = np.exp(-5.0 * np.abs(1.0 - df_comb['t']))
         score_mu = np.exp(-5.0 * np.abs(0.85 - mu))
         df_comb['stability_score'] = (0.7 * (score_t * score_mu) + 0.3 * df_comb['order_propensity']).round(3)
         
-        # Formule et descripteurs ML/DeepXDE
         df_comb['Formule'] = df_comb['el_A'] + '2' + df_comb['el_B'] + df_comb['el_Bp'] + 'O6'
         df_comb['d_e(B)'] = np.clip(df_comb['grp_B'] - df_comb['ox_B'], 0, 10)
         df_comb['d_e(Bp)'] = np.clip(df_comb['grp_Bp'] - df_comb['ox_Bp'], 0, 10)
@@ -336,10 +333,7 @@ def main():
         
         st.markdown("---")
         all_elements = sorted([el for el in ELEMENT_DB.keys() if el != "O"])
-        
-        # On filtre les valeurs par défaut pour s'assurer qu'elles existent bien dans all_elements
         default_forbidden = [el for el in ["Li", "Na", "K", "Rb", "Cs"] if el in all_elements]
-        
         forbidden_elements = st.multiselect("🛑 Exclure Éléments", all_elements, default=default_forbidden)
         
         st.markdown("---")
@@ -431,7 +425,7 @@ def main():
             
             st.dataframe(df_ml, use_container_width=True, hide_index=True)
             
-            csv_data = df_ml.to_csv(index=abs(0)).encode('utf-8')
+            csv_data = df_ml.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="⬇️ Télécharger le jeu de données des descripteurs (CSV pour ML / DeepXDE)",
                 data=csv_data,
