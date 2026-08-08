@@ -99,19 +99,12 @@ class HTEngine:
         df_A = pd.DataFrame(cations_A, columns=['el_A', 'ox_A', 'r_A', 'chi_A', 'grp_A', 'mass_A'])
         df_B = pd.DataFrame(cations_B, columns=['el_B', 'ox_B', 'r_B', 'chi_B', 'grp_B', 'mass_B'])
         
-        # Création d'une copie avec des suffixes explicites pour le site B'
-        df_Bp = df_B.rename(columns={
-            'el_B': 'el_Bp', 'ox_B': 'ox_Bp', 'r_B': 'r_Bp', 
-            'chi_B': 'chi_Bp', 'grp_B': 'grp_Bp', 'mass_B': 'mass_Bp'
-        })
-        
         df_B['key'] = 1
-        df_Bp['key'] = 1
         df_A_key = df_A.copy()
         df_A_key['key'] = 1
         
-        # Combinaison cartésienne propre des sites B et B' sans ambiguïté
-        df_BxB = pd.merge(df_B, df_Bp, on='key')
+        # Utilisation de '_Bp' comme suffixe explicite pour correspondre exactement aux colonnes
+        df_BxB = pd.merge(df_B, df_B, on='key', suffixes=('', '_Bp'))
         df_BxB = df_BxB[df_BxB['el_B'] < df_BxB['el_Bp']]
         
         # Neutralité de charge
