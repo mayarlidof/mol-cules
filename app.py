@@ -64,7 +64,7 @@ ELEMENT_DB = {
 STRUCTURE_CONFIG = {
     "Double Pérovskite": {
         "Cubique (Fm-3m)": {"sg": "Fm-3m", "cn_A": 12, "lattice": "cubic"},
-        "Tétragonale (I4/m)": {"sg": "I4/m", "cn_A": 8, "+lattice": "tetra"},
+        "Tétragonale (I4/m)": {"sg": "I4/m", "cn_A": 8, "lattice": "tetra"},
         "Orthorhombique (Pnma)": {"sg": "Pnma", "cn_A": 8, "lattice": "ortho"},
         "Monoclinique (P2_1/n)": {"sg": "P2_1/n", "cn_A": 8, "lattice": "mono"}
     },
@@ -114,7 +114,7 @@ class HTEngine:
         return cations_A, cations_B
 
     @staticmethod
-    def vectorized_screening(cations_A: list, cations_B: list, r_O: float, target_a: float, delta_a: float, t_min: float, t_max: float,F max_delta_chi: float, lattice_type: str) -> pd.DataFrame:
+    def vectorized_screening(cations_A: list, cations_B: list, r_O: float, target_a: float, delta_a: float, t_min: float, t_max: float, max_delta_chi: float, lattice_type: str) -> pd.DataFrame:
         start_time = time.time()
         df_A = pd.DataFrame(cations_A, columns=['el_A', 'ox_A', 'r_A', 'chi_A', 'grp_A', 'mass_A'])
         df_B = pd.DataFrame(cations_B, columns=['el_B', 'ox_B', 'r_B', 'chi_B', 'grp_B', 'mass_B'])
@@ -168,7 +168,7 @@ def generate_poscar(row: pd.Series) -> str:
 
 def generate_qe_input(row: pd.Series) -> str:
     formula = row['Formule']; a, b, c, beta = row['a_calc'], row['b_calc'], row['c_calc'], row['beta_calc']; beta_rad = np.deg2rad(beta); ax, bx, by = a, 0.0, b; cx, cy, cz = c * np.cos(beta_rad), 0.0, c * np.sin(beta_rad); el_A, el_B, el_Bp = row['el_A'], row['el_B'], row['el_Bp']
-    return f"""&control\n  calculation = 'scf'\n  prefix = '{formula}'\n  pseudo_dir = './pseudo/'\n  outdir = './out/'\n/\n&system\n  ibrav = 0, nat = 10, ntyp = 4,\n  ecutwfc = 60.0, ecutrho = 480.0,\n  occupations = 'smearing', smearing = 'm-p', degauss = 0.02\n/\n&electrons\n  conv_thr = 1.0d-8\n/\nCELL_PARAMETERS angstrom\n  {ax:.6f}  0.000000  0.000000\n  {bx:.6f}  {by:.6f}  0.000000\n  {cx:.6f}  {cy:.6f}  {cz:.6f}\n\nATOMIC_SPECIES\n  {el_A}  {ELEMENT_DB[el_A]['mass']}  {el_A}.pbe-spn-kjpaw_psl.1.0.0.UPF\n  {el_B}  {ELEMENT_DB[el_B]['mass']}  {el_B}.pbe-spn-kjpaw_psl.1.0.0.UPF\n  {el_Bp} {ELEMENT_DB[el_Bp]['mass']} {el_Bp}.pbe-spn-kjpaw_psl.1.0.02UPF\n  O   15.9990  O.pbe-n-kjpaw_psl.1.0.0.UPF\n\nATOMIC_POSITIONS crystal\n  {el_A}   0.250000  0.250000  0.250000\n  {el_A}   0.750000  0.750000  0.750000\n  {el_B}   0.000000  0.000000  0.000000\n  {el_Bp}  0.500000  0.500000  0.500000\n  O    0.250000  0.000000  0.000000\n  O    0.000000  0.250000  0.000000\n  O    0.000000  0.000000  0.250000\n  O    0.750000  0.500000  0.500000\n  O    0.500000  0.750000  0.500000\n  O    0.500000  0.500000  0.750000\n\nK_POINTS automatic\n  4 4 4 1 1 0\n"""
+    return f"""&control\n  calculation = 'scf'\n  prefix = '{formula}'\n  pseudo_dir = './pseudo/'\n  outdir = './out/'\n/\n&system\n  ibrav = 0, nat = 10, ntyp = 4,\n  ecutwfc = 60.0, ecutrho = 480.0,\n  occupations = 'smearing', smearing = 'm-p', degauss = 0.02\n/\n&electrons\n  conv_thr = 1.0d-8\n/\nCELL_PARAMETERS angstrom\n  {ax:.6f}  0.000000  0.000000\n  {bx:.6f}  {by:.6f}  0.000000\n  {cx:.6f}  {cy:.6f}  {cz:.6f}\n\nATOMIC_SPECIES\n  {el_A}  {ELEMENT_DB[el_A]['mass']}  {el_A}.pbe-spn-kjpaw_psl.1.0.0.UPF\n  {el_B}  {ELEMENT_DB[el_B]['mass']}  {el_B}.pbe-spn-kjpaw_psl.1.0.0.UPF\n  {el_Bp} {ELEMENT_DB[el_Bp]['mass']} {el_Bp}.pbe-spn-kjpaw_psl.1.0.0.UPF\n  O   15.9990  O.pbe-n-kjpaw_psl.1.0.0.UPF\n\nATOMIC_POSITIONS crystal\n  {el_A}   0.250000  0.250000  0.250000\n  {el_A}   0.750000  0.750000  0.750000\n  {el_B}   0.000000  0.000000  0.000000\n  {el_Bp}  0.500000  0.500000  0.500000\n  O    0.250000  0.000000  0.000000\n  O    0.000000  0.250000  0.000000\n  O    0.000000  0.000000  0.250000\n  O    0.750000  0.500000  0.500000\n  O    0.500000  0.750000  0.500000\n  O    0.500000  0.500000  0.750000\n\nK_POINTS automatic\n  4 4 4 1 1 0\n"""
 
 # ==============================================================================
 # 5. INTERFACE UTILISATEUR (STREAMLIT UI/UX)
@@ -316,14 +316,10 @@ def main():
             opt_delta = st.slider("Marge d'exploration ∆a autour de la cible (Å)", 0.05, 1.5, 0.3, step=0.05, help="Une marge plus grande trouvera plus de voisins isomorphes.")
             
             # --- LOGIQUE ROBUSTE VIA CALLBACK ---
-            # On sauvegarde les valeurs cibles dans l'état de session
             st.session_state._opt_a_target = round(float(selected_row['a_calc']), 4)
             st.session_state._opt_delta_target = opt_delta
             
-            # Définition du callback
             def trigger_optimization():
-                # Les callbacks s'exécutent AVANT le rerun. 
-                # On peut donc modifier les clés des widgets en toute sécurité.
                 st.session_state.target_a = st.session_state._opt_a_target
                 st.session_state.delta_a = st.session_state._opt_delta_target
                 st.session_state.auto_run = True
