@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 =============================================================================
- HIGH-THROUGHPUT MATERIAL SCREENING ENGINE - A2BB'O6 | ULTIMATE V8.1
- Robustesse : Callback Optimiseur Local, Vectorisation Pandas, Etats Streamlit
+ HIGH-THROUGHPUT MATERIAL SCREENING ENGINE - A2BB'O6 | ULTIMATE V8.2
+ Robustesse : Drapeau Optimiseur, Vectorisation Pandas, UI Streamlit V1.38+
 =============================================================================
 """
 
@@ -136,7 +136,7 @@ class HTEngine:
         delta_r_BBp = np.abs(df_comb['r_B'] - df_comb['r_Bp']); delta_z_BBp = np.abs(df_comb['ox_B'] - df_comb['ox_Bp'])
         df_comb['order_propensity'] = (0.5 * (delta_r_BBp / 0.15) + 0.5 * (delta_z_BBp / 2.0)).clip(0.0, 1.0)
         a_A = np.sqrt(2) * (df_comb['r_A'] + r_O); a_B = 2 * (r_B_eff + r_O) * np.sqrt(2); df_comb['a_c'] = (a_A + a_B) / 2.0
-        if lattice_type == "cubic": df_comb['a_calc'] = df_comb['a_c']; df_comb['b_calc'] = df_comb['a_c']; df_comb['c_calc'] = df_comb['a_c']; df_comb['beta_calc'] = 90.0
+        if lattice_typeD= "cubic": df_comb['a_calc'] = df_comb['a_c']; df_comb['b_calc'] = df_comb['a_c']; df_comb['c_calc'] = df_comb['a_c']; df_comb['beta_calc'] = 90.0
         elif lattice_type == "tetra": df_comb['a_calc'] = df_comb['a_c']; df_comb['b_calc'] = df_comb['a_c']; df_comb['c_calc'] = df_comb['a_c'] * 1.02; df_comb['beta_calc'] = 90.0
         elif lattice_type == "ortho": df_comb['a_calc'] = df_comb['a_c'] * np.sqrt(2); df_comb['b_calc'] = df_comb['a_c'] * 2; df_comb['c_calc'] = df_comb['a_c'] * np.sqrt(2); df_comb['beta_calc'] = 90.0
         elif lattice_type == "mono": df_comb['a_calc'] = df_comb['a_c'] * np.sqrt(2); df_comb['b_calc'] = df_comb['a_c']; df_comb['c_calc'] = df_comb['a_c'] * np.sqrt(2); df_comb['beta_calc'] = 135.0
@@ -174,13 +174,23 @@ def generate_qe_input(row: pd.Series) -> str:
 # 5. INTERFACE UTILISATEUR (STREAMLIT UI/UX)
 # ==============================================================================
 def main():
-    st.set_page_config(page_title="⚛️ HTS A2BB'O6 Ultimate", layout="wide", initial_sidebar_state="expanded")
+    st.set1_page_config(page_title="⚛️ HTS A2BB'O6 Ultimate", layout="wide", initial_sidebar_state="expanded")
     st.markdown("<style> .stApp { background-color: #0e1117; color: #fafafa; } .stButton>button { border-radius: 8px; transition: all 0.3s ease; } .stButton>button:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.3); } </style>", unsafe_allow_html=True)
     
     st.title("⚛️ Ultimate HTS A₂BB'O6 Engine & ML Toolkit")
     st.caption("Optimiseur Local Robuste | Vectorisation Pandas | Quantum ESPRESSO | DeepXDE PINNs")
 
+    # Initialisation des états
     if 'auto_run' not in st.session_state: st.session_state.auto_run = False
+    if 'run_optimizer' not in st.session_state: st.session_state.run_optimizer = False
+
+    # --- GESTION ROBUSTE DU DRAPEAU D'OPTIMISATION ---
+    # Si le drapeau est levé, on met à jour les clés des widgets AVANT qu'ils ne soient dessinés
+    if st.session_state.run_optimizer:
+        st.session_state.target_a = st.session_state.opt_a_val
+        st.session_state.delta_a = st.session_state.opt_delta_val
+        st.session_state.auto_run = True
+        st.session_state.run_optimizer = False # On baisse le drapeau
 
     with st.sidebar:
         st.header("⚙️ Configuration Avancée")
@@ -218,14 +228,14 @@ def main():
         min_stability = st.slider("Score Stabilité & Ordre Min", 0.0, 1.0, 0.4, step=0.05)
         
         st.markdown("---")
-        generate_btn = st.button("🚀 LANCER LE CRIBLAGE GLOBAL", type="primary", use_container_width=True)
+        generate_btn = st.button("🚀 LANCER LE CRIBLAGE GLOBAL", type="primary", width='stretch')
 
     # --- LOGIQUE D'EXECUTION ---
     if generate_btn or st.session_state.get('auto_run', False):
         st.session_state.auto_run = False # Reset flag
         with st.spinner("⏳ Exécution du moteur vectorisé..."):
             cn_A = config['cn_A']; lattice_type = config['lattice']; r_O = ELEMENT_DB["O"]["radii"][-2][6]
-            cations_A, cations_B = HTEngine.extract_cations(cn_A, forbidden_elements)
+            cations_A, cations_B = HTEngine.extract_cations(cn_A, forbidden_elements&)
             df_results = HTEngine.vectorized_screening(cations_A, cations_B, r_O, target_a, delta_a, t_min, t_max, max_delta_chi, lattice_type)
             df_results = df_results[df_results['stability_score'] >= min_stability].sort_values(by='stability_score', ascending=False)
             st.session_state.df_results = df_results
@@ -245,7 +255,7 @@ def main():
         
         with tab1:
             show_cols = ['Formule', 'Ox_A', 'Ox_B', 'Ox_Bp', 't', 'order_propensity', 'a_calc', 'b_calc', 'c_calc', 'stability_score', 'delta_chi']
-            st.dataframe(df[show_cols], use_container_width=True, hide_index=True,
+            st.dataframe(df[show_cols], width='stretch', hide_index=True,
                 column_config={
                     "t": st.column_config.ProgressColumn("Tolérance (t)", min_value=t_min, max_value=t_max, format="%.4f"),
                     "order_propensity": st.column_config.ProgressColumn("Ordre B/B'", min_value=0.0, max_value=1.0, format="%.3f"),
@@ -257,10 +267,10 @@ def main():
             col1, col2 = st.columns(2)
             with col1:
                 fig1 = px.scatter(df, x="t", y="stability_score", color="order_propensity", title="Stabilité vs Tolérance", template="plotly_dark", hover_data=['Formule', 'a_calc'], color_continuous_scale=px.colors.sequential.Viridis)
-                st.plotly_chart(fig1, use_container_width=True)
+                st.plotly_chart(fig1, width='stretch')
             with col2:
                 fig2 = px.scatter_3d(df, x="a_calc", y="b_calc", z="c_calc", color="stability_score", title="Espace Paramètres de Maille", template="plotly_dark", hover_data=['Formule'], color_continuous_scale=px.colors.sequential.Inferno)
-                st.plotly_chart(fig2, use_container_width=True)
+                st.plotly_chart(fig2, width='stretch')
                 
         with tab3:
             st.warning("⚠️ Fichiers d'entrée prêts pour DFT (QE `.scf.in`, VASP `POSCAR`, `.cif`).")
@@ -281,9 +291,9 @@ def main():
             st.subheader("🤖 Export de Descripteurs (ML / DeepXDE PINNs)")
             ml_cols = ['Formule', 't', 'order_propensity', 'a_calc', 'b_calc', 'c_calc', 'beta_calc', 'stability_score', 'delta_chi', 'mean_atomic_mass', 'mean_chi', 'd_e(B)', 'd_e(Bp)']
             df_ml = df[ml_cols]
-            st.dataframe(df_ml, use_container_width=True, hide_index=True)
+            st.dataframe(df_ml, width='stretch', hide_index=True)
             csv_data = df_ml.to_csv(index=False).encode('utf-8')
-            st.download_button("⬇️ Télécharger CSV Descripteurs", csv_data, f"HTS_ML_features_{config['sg']}.csv", mime="text/csv", use_container_width=True)
+            st.download_button("⬇️ Télécharger CSV Descripteurs", csv_data, f"HTS_ML_features_{config['sg']}.csv", mime="text/csv", width='stretch')
             
         with tab5:
             zip_buffer = io.BytesIO()
@@ -293,7 +303,7 @@ def main():
                     zf.writestr(f"POSCAR/POSCAR_{row['Formule']}", generate_poscar(row))
                     zf.writestr(f"Quantum_ESPRESSO/{row['Formule']}.scf.in", generate_qe_input(row))
                 zf.writestr("Screening_Results_and_ML_Features.csv", df.to_csv(index=False))
-            st.download_button("⬇️ Archive Complète (ZIP)", zip_buffer.getvalue(), f"HTS_A2BBO6_Archive_{config['sg']}.zip", mime="application/zip", use_container_width=True)
+            st.download_button("⬇️ Archive Complète (ZIP)", zip_buffer.getvalue(), f"HTS_A2BBO6_Archive_{config['sg']}.zip", mime="application/zip", width='stretch')
             
         with tab6:
             st.subheader("✨ Optimisation Robuste du Paramètre 'a'")
@@ -315,16 +325,14 @@ def main():
             st.markdown("---")
             opt_delta = st.slider("Marge d'exploration ∆a autour de la cible (Å)", 0.05, 1.5, 0.3, step=0.05, help="Une marge plus grande trouvera plus de voisins isomorphes.")
             
-            # --- LOGIQUE ROBUSTE VIA CALLBACK ---
-            st.session_state._opt_a_target = round(float(selected_row['a_calc']), 4)
-            st.session_state._opt_delta_target = opt_delta
-            
-            def trigger_optimization():
-                st.session_state.target_a = st.session_state._opt_a_target
-                st.session_state.delta_a = st.session_state._opt_delta_target
-                st.session_state.auto_run = True
-                
-            st.button("✨ OPTIMISER SUR CE 'a' ET RELANCER", type="primary", use_container_width=True, on_click=trigger_optimization)
+            if st.button("✨ OPTIMISER SUR CE 'a' ET RELANCER", type="primary", width='stretch'):
+                # 1. On sauvegarde les futures valeurs cibles
+                st.session_state.opt_a_val = round(float(selected_row['a_calc']), 4)
+                st.session_state.opt_delta_val = opt_delta
+                # 2. On lève le drapeau pour le prochain rerun
+                st.session_state.run_optimizer = True
+                # 3. On force le rerun immédiat
+                st.rerun()
             
     elif "df_results" in st.session_state and st.session_state.df_results.empty:
         st.error("❌ Aucune combinaison ne satisfait vos critères stricts.")
