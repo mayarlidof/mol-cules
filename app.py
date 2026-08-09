@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 =============================================================================
- HIGH-THROUGHPUT MATERIAL SCREENING ENGINE - A2BB'O6 | V7.0 INTELLIGENT
+ HIGH-THROUGHPUT MATERIAL SCREENING ENGINE - A2BB'O6 | V7.1 INTELLIGENT
  Inclus : Auto-Param, Optimisation Locale, QE, Ordre B/B', Descripteurs ML
 =============================================================================
 """
@@ -180,7 +180,17 @@ def main():
     st.title("⚛️ Intelligent HTS A₂BB'O6 Engine & ML Toolkit")
     st.caption("Auto-Paramétrage | Optimisation Locale | Vectorisation Pandas | Quantum ESPRESSO | DeepXDE")
 
+    # Initialisation des états
     if 'auto_run' not in st.session_state: st.session_state.auto_run = False
+    
+    # --- GESTION DES MAJ WIDGETS (Optimisation) ---
+    # On vérifie si une mise à jour est en attente AVANT de dessiner les widgets
+    if 'pending_a_update' in st.session_state:
+        st.session_state.target_a = st.session_state.pending_a_update
+        del st.session_state.pending_a_update
+    if 'pending_delta_update' in st.session_state:
+        st.session_state.delta_a = st.session_state.pending_delta_update
+        del st.session_state.pending_delta_update
 
     with st.sidebar:
         st.header("⚙️ Configuration")
@@ -314,9 +324,9 @@ def main():
             opt_delta = st.slider("Marge d'exploration ∆a autour de la cible (Å)", 0.05, 1.0, 0.3, step=0.05, help="Une marge plus grande trouvera plus de voisins, mais ils pourraient être moins stables.")
             
             if st.button("🚀 OPTIMISER AUTOUR DE CETTE STRUCTURE", type="primary", use_container_width=True):
-                # Mise à jour dynamique des cibles et déclenchement
-                st.session_state.target_a = selected_row['a_calc']
-                st.session_state.delta_a = opt_delta
+                # Utilisation des drapeaux en attente pour modifier les widgets au prochain rerun
+                st.session_state.pending_a_update = selected_row['a_calc']
+                st.session_state.pending_delta_update = opt_delta
                 st.session_state.auto_run = True
                 st.rerun()
             
