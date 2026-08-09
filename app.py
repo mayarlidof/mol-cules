@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 =============================================================================
- HIGH-THROUGHPUT MATERIAL SCREENING ENGINE - A2BB'O6 | V7.1 INTELLIGENT
- Inclus : Auto-Param, Optimisation Locale, QE, Ordre B/B', Descripteurs ML
+ HIGH-THROUGHPUT MATERIAL SCREENING ENGINE - A2BB'O6 | ULTIMATE V8.0
+ Robustesse : Optimiseur Local 'a_calc', Vectorisation Pandas, Etats Streamlit
 =============================================================================
 """
 
@@ -14,10 +14,10 @@ import io
 import zipfile
 import plotly.express as px
 import time
-from typing import Dict, Optional, Tuple
+from typing import Tuple
 
 # ==============================================================================
-# 1. BASE DE DONNÉES LOCALE ULTIME
+# 1. BASE DE DONNÉES LOCALE ULTIME (Shannon + Pauling + Masse)
 # ==============================================================================
 ELEMENT_DB = {
     "O":  {"radii": {-2: {2: 1.35, 3: 1.36, 4: 1.38, 6: 1.40, 8: 1.42, 12: 1.44}}, "chi_pauling": 3.44, "group": 16, "mass": 15.999},
@@ -79,6 +79,7 @@ STRUCTURE_CONFIG = {
 class HTEngine:
     @staticmethod
     def calculate_dynamic_bounds(cn_A: int, lattice_type: str, forbidden: list) -> Tuple[float, float]:
+        """Calcule intelligemment la valeur cible 'a' et la marge ∆a basées sur les rayons moyens."""
         r_O = ELEMENT_DB["O"]["radii"][-2][6]
         r_A_list, r_B_list = [], []
         for el, props in ELEMENT_DB.items():
@@ -91,11 +92,13 @@ class HTEngine:
         min_r_A, max_r_A = min(r_A_list), max(r_A_list)
         min_r_B, max_r_B = min(r_B_list), max(r_B_list)
         mean_r_A, mean_r_B = np.mean(r_A_list), np.mean(r_B_list)
+        
         def calc_a_c(r_A, r_B): return (np.sqrt(2) * (r_A + r_O) + 2 * (r_B + r_O) * np.sqrt(2)) / 2.0
         def transform_a(a_c, r_B, l_type):
             if l_type in ["cubic", "tetra"]: return a_c
             elif l_type in ["ortho", "mono"]: return a_c * np.sqrt(2)
             elif l_type == "hexagonal": return 2 * (r_B + r_O)
+            
         mean_a = transform_a(calc_a_c(mean_r_A, mean_r_B), mean_r_B, lattice_type)
         min_a = transform_a(calc_a_c(min_r_A, min_r_B), min_r_B, lattice_type)
         max_a = transform_a(calc_a_c(max_r_A, max_r_B), max_r_B, lattice_type)
@@ -118,39 +121,61 @@ class HTEngine:
         start_time = time.time()
         df_A = pd.DataFrame(cations_A, columns=['el_A', 'ox_A', 'r_A', 'chi_A', 'grp_A', 'mass_A'])
         df_B = pd.DataFrame(cations_B, columns=['el_B', 'ox_B', 'r_B', 'chi_B', 'grp_B', 'mass_B'])
+        
+        # Produit cartésien vectorisé sûr (évite les bugs de suffixes Pandas)
         df_B_left = df_B.copy()
         df_B_right = df_B.rename(columns={'el_B': 'el_Bp', 'ox_B': 'ox_Bp', 'r_B': 'r_Bp', 'chi_B': 'chi_Bp', 'grp_B': 'grp_Bp', 'mass_B': 'mass_Bp'})
         df_B_left['key'] = 1; df_B_right['key'] = 1
         df_BxB = pd.merge(df_B_left, df_B_right, on='key')
-        df_BxB = df_BxB[df_BxB['el_B'] < df_BxB['el_Bp']]
+        df_BxB = df_BxB[df_BxB['el_B'] < df_BxB['el_Bp']] # Évite les doublons A2BB' vs A2B'B
+        
+        # Neutralité de charge : 2*qA + qB + qBp = 12
         df_BxB['req_2_ox_A'] = 12 - (df_BxB['ox_B'] + df_BxB['ox_Bp'])
         df_BxB = df_BxB[(df_BxB['req_2_ox_A'] > 0) & (df_BxB['req_2_ox_A'] % 2 == 0)]
         df_BxB['req_ox_A'] = df_BxB['req_2_ox_A'] / 2
+        
         df_A_key = df_A[['el_A', 'ox_A', 'r_A', 'chi_A', 'grp_A', 'mass_A']].copy()
         df_comb = pd.merge(df_BxB, df_A_key, left_on='req_ox_A', right_on='ox_A')
+        
         r_B_eff = (df_comb['r_B'] + df_comb['r_Bp']) / 2.0
+        
+        # Filtre Tolérance
         df_comb['t'] = (df_comb['r_A'] + r_O) / (np.sqrt(2) * (r_B_eff + r_O))
         df_comb = df_comb[(df_comb['t'] >= t_min) & (df_comb['t'] <= t_max)]
+        
+        # Filtre Redox
         df_comb['delta_chi'] = np.abs(df_comb['chi_B'] - df_comb['chi_Bp'])
         df_comb = df_comb[df_comb['delta_chi'] <= max_delta_chi]
+        
+        # Score d'Ordre B/B'
         delta_r_BBp = np.abs(df_comb['r_B'] - df_comb['r_Bp']); delta_z_BBp = np.abs(df_comb['ox_B'] - df_comb['ox_Bp'])
         df_comb['order_propensity'] = (0.5 * (delta_r_BBp / 0.15) + 0.5 * (delta_z_BBp / 2.0)).clip(0.0, 1.0)
+        
+        # Paramètres de Maille
         a_A = np.sqrt(2) * (df_comb['r_A'] + r_O); a_B = 2 * (r_B_eff + r_O) * np.sqrt(2); df_comb['a_c'] = (a_A + a_B) / 2.0
         if lattice_type == "cubic": df_comb['a_calc'] = df_comb['a_c']; df_comb['b_calc'] = df_comb['a_c']; df_comb['c_calc'] = df_comb['a_c']; df_comb['beta_calc'] = 90.0
         elif lattice_type == "tetra": df_comb['a_calc'] = df_comb['a_c']; df_comb['b_calc'] = df_comb['a_c']; df_comb['c_calc'] = df_comb['a_c'] * 1.02; df_comb['beta_calc'] = 90.0
         elif lattice_type == "ortho": df_comb['a_calc'] = df_comb['a_c'] * np.sqrt(2); df_comb['b_calc'] = df_comb['a_c'] * 2; df_comb['c_calc'] = df_comb['a_c'] * np.sqrt(2); df_comb['beta_calc'] = 90.0
         elif lattice_type == "mono": df_comb['a_calc'] = df_comb['a_c'] * np.sqrt(2); df_comb['b_calc'] = df_comb['a_c']; df_comb['c_calc'] = df_comb['a_c'] * np.sqrt(2); df_comb['beta_calc'] = 135.0
         elif lattice_type == "hexagonal": df_comb['a_calc'] = 2 * (r_B_eff + r_O); df_comb['b_calc'] = df_comb['a_calc']; df_comb['c_calc'] = df_comb['a_calc'] * np.sqrt(6); df_comb['beta_calc'] = 90.0
+        
+        # Filtre géométrique final sur 'a'
         df_comb = df_comb[np.abs(df_comb['a_calc'] - target_a) <= delta_a]
+        
+        # Score de Stabilité Global
         mu = r_B_eff / r_O; score_t = np.exp(-5.0 * np.abs(1.0 - df_comb['t'])); score_mu = np.exp(-5.0 * np.abs(0.85 - mu))
         df_comb['stability_score'] = (0.7 * (score_t * score_mu) + 0.3 * df_comb['order_propensity']).round(3)
+        
+        # Descripteurs ML / DeepXDE
         df_comb['Formule'] = df_comb['el_A'] + '2' + df_comb['el_B'] + df_comb['el_Bp'] + 'O6'
         df_comb['d_e(B)'] = np.clip(df_comb['grp_B'] - df_comb['ox_B'], 0, 10); df_comb['d_e(Bp)'] = np.clip(df_comb['grp_Bp'] - df_comb['ox_Bp'], 0, 10)
         mass_O = ELEMENT_DB['O']['mass']; chi_O = ELEMENT_DB['O']['chi_pauling']
         df_comb['mean_atomic_mass'] = (2 * df_comb['mass_A'] + df_comb['mass_B'] + df_comb['mass_Bp'] + 6 * mass_O) / 10.0
         df_comb['mean_chi'] = (2 * df_comb['chi_A'] + df_comb['chi_B'] + df_comb['chi_Bp'] + 6 * chi_O) / 10.0
+        
         cols = ['Formule', 'el_A', 'el_B', 'el_Bp', 'ox_A', 'ox_B', 'ox_Bp', 't', 'a_calc', 'b_calc', 'c_calc', 'beta_calc', 'stability_score', 'order_propensity', 'delta_chi', 'd_e(B)', 'd_e(Bp)', 'mean_atomic_mass', 'mean_chi']
         df_final = df_comb[cols].copy(); df_final.rename(columns={'ox_A': 'Ox_A', 'ox_B': 'Ox_B', 'ox_Bp': 'Ox_Bp'}, inplace=True)
+        
         st.session_state.exec_time = time.time() - start_time
         return df_final.reset_index(drop=True)
 
@@ -174,17 +199,16 @@ def generate_qe_input(row: pd.Series) -> str:
 # 5. INTERFACE UTILISATEUR (STREAMLIT UI/UX)
 # ==============================================================================
 def main():
-    st.set_page_config(page_title="⚛️ HTS A2BB'O6 Intelligent", layout="wide", initial_sidebar_state="expanded")
+    st.set_page_config(page_title="⚛️ HTS A2BB'O6 Ultimate", layout="wide", initial_sidebar_state="expanded")
     st.markdown("<style> .stApp { background-color: #0e1117; color: #fafafa; } .stButton>button { border-radius: 8px; transition: all 0.3s ease; } .stButton>button:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.3); } </style>", unsafe_allow_html=True)
     
-    st.title("⚛️ Intelligent HTS A₂BB'O6 Engine & ML Toolkit")
-    st.caption("Auto-Paramétrage | Optimisation Locale | Vectorisation Pandas | Quantum ESPRESSO | DeepXDE")
+    st.title("⚛️ Ultimate HTS A₂BB'O6 Engine & ML Toolkit")
+    st.caption("Optimiseur Local Robuste | Vectorisation Pandas | Quantum ESPRESSO | DeepXDE PINNs")
 
-    # Initialisation des états
     if 'auto_run' not in st.session_state: st.session_state.auto_run = False
     
-    # --- GESTION DES MAJ WIDGETS (Optimisation) ---
-    # On vérifie si une mise à jour est en attente AVANT de dessiner les widgets
+    # --- GESTION ROBUSTE DES MAJ WIDGETS (Contournement de StreamlitAPIException) ---
+    # On vérifie si une mise à jour est en attente AVANT de dessiner les widgets concernés.
     if 'pending_a_update' in st.session_state:
         st.session_state.target_a = st.session_state.pending_a_update
         del st.session_state.pending_a_update
@@ -193,7 +217,7 @@ def main():
         del st.session_state.pending_delta_update
 
     with st.sidebar:
-        st.header("⚙️ Configuration")
+        st.header("⚙️ Configuration Avancée")
         struct_type = st.selectbox("🏗️ Type de Structure", list(STRUCTURE_CONFIG.keys()))
         available_families = list(STRUCTURE_CONFIG[struct_type].keys())
         struct_family = st.selectbox("🔬 Famille / Groupe d'espace", available_families)
@@ -205,6 +229,7 @@ def main():
         all_elements = sorted([el for el in ELEMENT_DB.keys() if el != "O"])
         forbidden_elements = st.multiselect("🛑 Exclure Éléments", all_elements, default=[])
         
+        # Automatisation intelligente initiale du paramètre de maille
         auto_target_a, auto_delta_a = HTEngine.calculate_dynamic_bounds(config['cn_A'], config['lattice'], forbidden_elements)
         
         if 'last_struct_family' not in st.session_state: st.session_state.last_struct_family = struct_family
@@ -228,7 +253,7 @@ def main():
         min_stability = st.slider("Score Stabilité & Ordre Min", 0.0, 1.0, 0.4, step=0.05)
         
         st.markdown("---")
-        generate_btn = st.button("🚀 LANCER LE CRIBLAGE", type="primary", use_container_width=True)
+        generate_btn = st.button("🚀 LANCER LE CRIBLAGE GLOBAL", type="primary", use_container_width=True)
 
     # --- LOGIQUE D'EXECUTION ---
     if generate_btn or st.session_state.auto_run:
@@ -250,7 +275,7 @@ def main():
         st.success(f"✅ **{len(df)}** combinaisons trouvées en **{exec_time:.4f} secondes**.")
         
         tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-            "📊 Données & Ordre", "📈 Visualisations 3D", "💾 Export Fichiers", "🤖 Export ML", "📦 Archive ZIP", "🎯 Optimisation Locale"
+            "📊 Données & Ordre", "📈 Visualisations 3D", "💾 Export Fichiers", "🤖 Export ML", "📦 Archive ZIP", "✨ Optimiseur Local 'a'"
         ])
         
         with tab1:
@@ -288,7 +313,7 @@ def main():
                             with c3: st.download_button("QE.in", generate_qe_input(row), f"{row['Formule']}.scf.in", key=f"qe_{i+j}")
                                 
         with tab4:
-            st.subheader("🤖 Export de Descripteurs (ML / DeepXDE)")
+            st.subheader("🤖 Export de Descripteurs (ML / DeepXDE PINNs)")
             ml_cols = ['Formule', 't', 'order_propensity', 'a_calc', 'b_calc', 'c_calc', 'beta_calc', 'stability_score', 'delta_chi', 'mean_atomic_mass', 'mean_chi', 'd_e(B)', 'd_e(Bp)']
             df_ml = df[ml_cols]
             st.dataframe(df_ml, use_container_width=True, hide_index=True)
@@ -306,25 +331,28 @@ def main():
             st.download_button("⬇️ Archive Complète (ZIP)", zip_buffer.getvalue(), f"HTS_A2BBO6_Archive_{config['sg']}.zip", mime="application/zip", use_container_width=True)
             
         with tab6:
-            st.subheader("🎯 Optimisation et Exploration Locale")
-            st.markdown("Sélectionnez une structure de référence parmi les résultats. L'optimisation va définir son paramètre de maille calculé (`a_calc`) comme nouvelle cible et relancer une recherche élargie pour découvrir des **structures alternatives ou métastables** voisines.")
+            st.subheader("✨ Optimisation Robuste du Paramètre 'a'")
+            st.markdown("""
+                Explorez l'espace chimique isomorphe autour d'une structure cible. 
+                1. Sélectionnez une structure de référence.
+                2. L'optimiseur extrait son `a_calc` exact et le définit comme nouvelle cible.
+                3. La recherche est relancée automatiquement pour découvrir des **alternatives métastables**.
+            """)
             
-            selected_formula = st.selectbox("Sélectionnez une structure de référence :", df['Formule'].values, key='opt_select')
+            selected_formula = st.selectbox("🎯 Sélectionnez la structure de référence :", df['Formule'].values, key='opt_select')
             selected_row = df[df['Formule'] == selected_formula].iloc[0]
             
             c_opt1, c_opt2, c_opt3 = st.columns(3)
-            with c_opt1:
-                st.metric("Structure Source", selected_formula)
-            with c_opt2:
-                st.metric("Paramètre a_calc (Å)", f"{selected_row['a_calc']:.4f}")
-            with c_opt3:
-                st.metric("Score de Stabilité", f"{selected_row['stability_score']:.3f}")
+            with c_opt1: st.metric("Structure Source", selected_formula)
+            with c_opt2: st.metric("Paramètre a_calc (Å)", f"{selected_row['a_calc']:.4f}")
+            with c_opt3: st.metric("Score de Stabilité", f"{selected_row['stability_score']:.3f}")
                 
             st.markdown("---")
-            opt_delta = st.slider("Marge d'exploration ∆a autour de la cible (Å)", 0.05, 1.0, 0.3, step=0.05, help="Une marge plus grande trouvera plus de voisins, mais ils pourraient être moins stables.")
+            opt_delta = st.slider("Marge d'exploration ∆a autour de la cible (Å)", 0.05, 1.5, 0.3, step=0.05, help="Une marge plus grande trouvera plus de voisins isomorphes.")
             
-            if st.button("🚀 OPTIMISER AUTOUR DE CETTE STRUCTURE", type="primary", use_container_width=True):
-                # Utilisation des drapeaux en attente pour modifier les widgets au prochain rerun
+            if st.button("✨ OPTIMISER SUR CE 'a' ET RELANCER", type="primary", use_container_width=True):
+                # Sécurité d'état : Utilisation de drapeaux en attente pour modifier 
+                # les widgets au prochain rerun (évite StreamlitAPIException)
                 st.session_state.pending_a_update = selected_row['a_calc']
                 st.session_state.pending_delta_update = opt_delta
                 st.session_state.auto_run = True
