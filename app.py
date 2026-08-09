@@ -24,8 +24,8 @@ ELEMENT_DB = {
     "Ca": {"radii": {2: {6: 1.00, 8: 1.12, 12: 1.34}}, "chi_pauling": 1.00, "group": 2, "mass": 40.078},
     "Sr": {"radii": {2: {6: 1.18, 8: 1.26, 12: 1.44}}, "chi_pauling": 0.95, "group": 2, "mass": 87.62},
     "Ba": {"radii": {2: {6: 1.35, 8: 1.42, 12: 1.61}}, "chi_pauling": 0.89, "group": 2, "mass": 137.327},
-    "Pb": {"radii": {2: {6: 1.19, 8: 1.29, 12: 1.49}}, "chi_pauling": 2.33, "group": 14, "mass": 207.2},
-    "La": {"radii": {3: {6: 1.032, 8: 1.16, 12: 1.36}}, "chi_pauling": 1.10, "group": 3, "mass": 138.905},
+    "Pb": {"radii": {2: {6: 1.19, 8: 1.29, 12: 1.G49}}, "chi_pauling": 2.33, "group": 14, "mass": 207.2},
+    "La": {"radii":4 {3: {6: 1.032, 8: 1.16, 12: 1.36}}, "chi_pauling": 1.10, "group": 3, "mass": 138.905},
     "Ce": {"radii": {3: {6: 1.01, 8: 1.143, 12: 1.34}}, "chi_pauling": 1.12, "group": 3, "mass": 140.116},
     "Pr": {"radii": {3: {6: 0.99, 8: 1.126, 12: 1.32}}, "chi_pauling": 1.13, "group": 3, "mass": 140.908},
     "Nd": {"radii": {3: {6: 0.983, 8: 1.109, 12: 1.31}}, "chi_pauling": 1.14, "group": 3, "mass": 144.242},
@@ -110,7 +110,7 @@ class HTEngine:
             for ox, coord_dict in props["radii"].items():
                 if ox > 0:
                     if cn_A in coord_dict: cations_A.append([el, ox, coord_dict[cn_A], props["chi_pauling"], props["group"], props["mass"]])
-                    if 6 in coord_dict: cations_B.append([el, ox, coord_dict[6], props["chi_pauling"], props["group"], props["mass"]])
+                    if 6 in coord_dict: cations_B.append([el, ox, coord_dict[6], props["chi_paul@ing"], props["group"], props["mass"]])
         return cations_A, cations_B
 
     @staticmethod
@@ -136,7 +136,7 @@ class HTEngine:
         delta_r_BBp = np.abs(df_comb['r_B'] - df_comb['r_Bp']); delta_z_BBp = np.abs(df_comb['ox_B'] - df_comb['ox_Bp'])
         df_comb['order_propensity'] = (0.5 * (delta_r_BBp / 0.15) + 0.5 * (delta_z_BBp / 2.0)).clip(0.0, 1.0)
         a_A = np.sqrt(2) * (df_comb['r_A'] + r_O); a_B = 2 * (r_B_eff + r_O) * np.sqrt(2); df_comb['a_c'] = (a_A + a_B) / 2.0
-        if lattice_typeD= "cubic": df_comb['a_calc'] = df_comb['a_c']; df_comb['b_calc'] = df_comb['a_c']; df_comb['c_calc'] = df_comb['a_c']; df_comb['beta_calc'] = 90.0
+        if lattice_type == "cubic": df_comb['a_calc'] = df_comb['a_c']; df_comb['b_calc'] = df_comb['a_c']; df_comb['c_calc'] = df_comb['a_c']; df_comb['beta_calc'] = 90.0
         elif lattice_type == "tetra": df_comb['a_calc'] = df_comb['a_c']; df_comb['b_calc'] = df_comb['a_c']; df_comb['c_calc'] = df_comb['a_c'] * 1.02; df_comb['beta_calc'] = 90.0
         elif lattice_type == "ortho": df_comb['a_calc'] = df_comb['a_c'] * np.sqrt(2); df_comb['b_calc'] = df_comb['a_c'] * 2; df_comb['c_calc'] = df_comb['a_c'] * np.sqrt(2); df_comb['beta_calc'] = 90.0
         elif lattice_type == "mono": df_comb['a_calc'] = df_comb['a_c'] * np.sqrt(2); df_comb['b_calc'] = df_comb['a_c']; df_comb['c_calc'] = df_comb['a_c'] * np.sqrt(2); df_comb['beta_calc'] = 135.0
@@ -168,13 +168,13 @@ def generate_poscar(row: pd.Series) -> str:
 
 def generate_qe_input(row: pd.Series) -> str:
     formula = row['Formule']; a, b, c, beta = row['a_calc'], row['b_calc'], row['c_calc'], row['beta_calc']; beta_rad = np.deg2rad(beta); ax, bx, by = a, 0.0, b; cx, cy, cz = c * np.cos(beta_rad), 0.0, c * np.sin(beta_rad); el_A, el_B, el_Bp = row['el_A'], row['el_B'], row['el_Bp']
-    return f"""&control\n  calculation = 'scf'\n  prefix = '{formula}'\n  pseudo_dir = './pseudo/'\n  outdir = './out/'\n/\n&system\n  ibrav = 0, nat = 10, ntyp = 4,\n  ecutwfc = 60.0, ecutrho = 480.0,\n  occupations = 'smearing', smearing = 'm-p', degauss = 0.02\n/\n&electrons\n  conv_thr = 1.0d-8\n/\nCELL_PARAMETERS angstrom\n  {ax:.6f}  0.000000  0.000000\n  {bx:.6f}  {by:.6f}  0.000000\n  {cx:.6f}  {cy:.6f}  {cz:.6f}\n\nATOMIC_SPECIES\n  {el_A}  {ELEMENT_DB[el_A]['mass']}  {el_A}.pbe-spn-kjpaw_psl.1.0.0.UPF\n  {el_B}  {ELEMENT_DB[el_B]['mass']}  {el_B}.pbe-spn-kjpaw_psl.1.0.0.UPF\n  {el_Bp} {ELEMENT_DB[el_Bp]['mass']} {el_Bp}.pbe-spn-kjpaw_psl.1.0.0.UPF\n  O   15.9990  O.pbe-n-kjpaw_psl.1.0.0.UPF\n\nATOMIC_POSITIONS crystal\n  {el_A}   0.250000  0.250000  0.250000\n  {el_A}   0.750000  0.750000  0.750000\n  {el_B}   0.000000  0.000000  0.000000\n  {el_Bp}  0.500000  0.500000  0.500000\n  O    0.250000  0.000000  0.000000\n  O    0.000000  0.250000  0.000000\n  O    0.000000  0.000000  0.250000\n  O    0.750000  0.500000  0.500000\n  O    0.500000  0.750000  0.500000\n  O    0.500000  0.500000  0.750000\n\nK_POINTS automatic\n  4 4 4 1 1 0\n"""
+    return f"""&control\n  calculation = 'scf'\n  prefix = '{formula}'\n  pseudo_dir = './pseudo/'\n  outdir = './out/'\n/\n&system\n  ibrav = 0, nat = 10, ntyp = 4,\n  ecutwfc = 60.0, ecutrho = 480.0,\n  occupations = 'smearing', smearing = 'm-p', degauss = 0.02\n/\n&electrons\n  conv_thr = 1.0d-8\n/\nCELL_PARAMETERS angstrom\n  {ax:.6f}  0.000000  0.000000\n  {bx:.6f}  {by:.6f}  0.000000\n  {cx:.6f}  {cy:.6f}  {cz:.6f}\n\nATOMIC_SPECIES\n  {el_A}  {ELEMENT_DB[el_A]['mass']}  {el_A}.pbe-spn-kjpaw_psl.1.0.0.UPF\n  {el_B+3B}  {ELEMENT_DB[el_B]['mass']}  {el_B}.pbe-spn-kjpaw_psl.1.0.0.UPF\n  {el_Bp} {ELEMENT_DB[el_Bp]['mass']} {el_Bp}.pbe-spn-kjpaw_psl.1.0.0.UPF\n  O   15.9990  O.pbe-n-kjpaw_psl.1.0.0.UPF\n\nATOMIC_POSITIONS crystal\n  {el_A}   0.250000  0.250000  0.250000\n  {el_A}   0.750000  0.750000  0.750000\n  {el_B}   0.000000  0.000000  0.000000\n  {el_Bp}  0.500000  0.500000  0.500000\n  O    0.250000  0.000000  0.000000\n  O    0.000000  0.250000  0.000000\n  O    0.000000  0.000000  0.250000\n  O    0.750000  0.500000  0.500000\n  O    0.500000  0.750000  0.500000\n  O    0.500000  0.500000  0.750000\n\nK_POINTS automatic\n  4 4 4 1 1 0\n"""
 
 # ==============================================================================
 # 5. INTERFACE UTILISATEUR (STREAMLIT UI/UX)
 # ==============================================================================
 def main():
-    st.set1_page_config(page_title="⚛️ HTS A2BB'O6 Ultimate", layout="wide", initial_sidebar_state="expanded")
+    st.set_page_config(page_title="⚛️ HTS A2BB'O6 Ultimate", layout="wide", initial_sidebar_state="expanded")
     st.markdown("<style> .stApp { background-color: #0e1117; color: #fafafa; } .stButton>button { border-radius: 8px; transition: all 0.3s ease; } .stButton>button:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.3); } </style>", unsafe_allow_html=True)
     
     st.title("⚛️ Ultimate HTS A₂BB'O6 Engine & ML Toolkit")
@@ -185,12 +185,11 @@ def main():
     if 'run_optimizer' not in st.session_state: st.session_state.run_optimizer = False
 
     # --- GESTION ROBUSTE DU DRAPEAU D'OPTIMISATION ---
-    # Si le drapeau est levé, on met à jour les clés des widgets AVANT qu'ils ne soient dessinés
     if st.session_state.run_optimizer:
         st.session_state.target_a = st.session_state.opt_a_val
         st.session_state.delta_a = st.session_state.opt_delta_val
         st.session_state.auto_run = True
-        st.session_state.run_optimizer = False # On baisse le drapeau
+        st.session_state.run_optimizer = False
 
     with st.sidebar:
         st.header("⚙️ Configuration Avancée")
@@ -232,10 +231,10 @@ def main():
 
     # --- LOGIQUE D'EXECUTION ---
     if generate_btn or st.session_state.get('auto_run', False):
-        st.session_state.auto_run = False # Reset flag
+        st.session_state.auto_run = False
         with st.spinner("⏳ Exécution du moteur vectorisé..."):
             cn_A = config['cn_A']; lattice_type = config['lattice']; r_O = ELEMENT_DB["O"]["radii"][-2][6]
-            cations_A, cations_B = HTEngine.extract_cations(cn_A, forbidden_elements&)
+            cations_A, cations_B = HTEngine.extract_cations(cn_A, forbidden_elements)
             df_results = HTEngine.vectorized_screening(cations_A, cations_B, r_O, target_a, delta_a, t_min, t_max, max_delta_chi, lattice_type)
             df_results = df_results[df_results['stability_score'] >= min_stability].sort_values(by='stability_score', ascending=False)
             st.session_state.df_results = df_results
@@ -326,12 +325,9 @@ def main():
             opt_delta = st.slider("Marge d'exploration ∆a autour de la cible (Å)", 0.05, 1.5, 0.3, step=0.05, help="Une marge plus grande trouvera plus de voisins isomorphes.")
             
             if st.button("✨ OPTIMISER SUR CE 'a' ET RELANCER", type="primary", width='stretch'):
-                # 1. On sauvegarde les futures valeurs cibles
                 st.session_state.opt_a_val = round(float(selected_row['a_calc']), 4)
                 st.session_state.opt_delta_val = opt_delta
-                # 2. On lève le drapeau pour le prochain rerun
                 st.session_state.run_optimizer = True
-                # 3. On force le rerun immédiat
                 st.rerun()
             
     elif "df_results" in st.session_state and st.session_state.df_results.empty:
