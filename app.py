@@ -205,7 +205,8 @@ class HTEngine:
         df_final = df_comb[cols].copy()
         df_final.rename(columns={'ox_A': 'Ox_A', 'ox_B': 'Ox_B', 'ox_Bp': 'Ox_Bp'}, inplace=True)
         
-        st.sessionC_state.exec_time = time.time() - start_time
+        # CORRECTION DU BUG ICI
+        st.session_state.exec_time = time.time() - start_time
         return df_final.reset_index(drop=True)
 
 # ==============================================================================
