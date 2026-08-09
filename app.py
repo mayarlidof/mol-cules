@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 =============================================================================
- HIGH-THROUGHPUT MATERIAL SCREENING ENGINE - A2BB'O6 | V6.0 INTELLIGENT
- Inclus : Auto-Paramétrage, QE .scf.in, Ordre B/B', Descripteurs ML/DeepXDE
+ HIGH-THROUGHPUT MATERIAL SCREENING ENGINE - A2BB'O6 | V7.0 INTELLIGENT
+ Inclus : Auto-Param, Optimisation Locale, QE, Ordre B/B', Descripteurs ML
 =============================================================================
 """
 
@@ -79,41 +79,27 @@ STRUCTURE_CONFIG = {
 class HTEngine:
     @staticmethod
     def calculate_dynamic_bounds(cn_A: int, lattice_type: str, forbidden: list) -> Tuple[float, float]:
-        """Calcule intelligemment la valeur cible 'a' et la marge ∆a basées sur les rayons moyens."""
         r_O = ELEMENT_DB["O"]["radii"][-2][6]
         r_A_list, r_B_list = [], []
-        
         for el, props in ELEMENT_DB.items():
             if el in forbidden or el == "O": continue
             for ox, coord_dict in props["radii"].items():
                 if ox > 0:
                     if cn_A in coord_dict: r_A_list.append(coord_dict[cn_A])
                     if 6 in coord_dict: r_B_list.append(coord_dict[6])
-                    
-        if not r_A_list or not r_B_list:
-            return 8.0, 2.0 # Fallback si base vide
-            
+        if not r_A_list or not r_B_list: return 8.0, 2.0
         min_r_A, max_r_A = min(r_A_list), max(r_A_list)
         min_r_B, max_r_B = min(r_B_list), max(r_B_list)
         mean_r_A, mean_r_B = np.mean(r_A_list), np.mean(r_B_list)
-        
-        def calc_a_c(r_A, r_B):
-            a_A = np.sqrt(2) * (r_A + r_O)
-            a_B = 2 * (r_B + r_O) * np.sqrt(2)
-            return (a_A + a_B) / 2.0
-            
+        def calc_a_c(r_A, r_B): return (np.sqrt(2) * (r_A + r_O) + 2 * (r_B + r_O) * np.sqrt(2)) / 2.0
         def transform_a(a_c, r_B, l_type):
             if l_type in ["cubic", "tetra"]: return a_c
             elif l_type in ["ortho", "mono"]: return a_c * np.sqrt(2)
             elif l_type == "hexagonal": return 2 * (r_B + r_O)
-            
         mean_a = transform_a(calc_a_c(mean_r_A, mean_r_B), mean_r_B, lattice_type)
         min_a = transform_a(calc_a_c(min_r_A, min_r_B), min_r_B, lattice_type)
         max_a = transform_a(calc_a_c(max_r_A, max_r_B), max_r_B, lattice_type)
-        
-        # La marge couvre confortablement l'étendue des possibles
         default_delta_a = round(max(0.5, (max_a - min_a) / 2.0 + 0.2), 2)
-        
         return round(mean_a, 3), default_delta_a
 
     @staticmethod
@@ -123,89 +109,48 @@ class HTEngine:
             if el in forbidden or el == "O": continue
             for ox, coord_dict in props["radii"].items():
                 if ox > 0:
-                    if cn_A in coord_dict:
-                        cations_A.append([el, ox, coord_dict[cn_A], props["chi_pauling"], props["group"], props["mass"]])
-                    if 6 in coord_dict:
-                        cations_B.append([el, ox, coord_dict[6], props["chi_pauling"], props["group"], props["mass"]])
+                    if cn_A in coord_dict: cations_A.append([el, ox, coord_dict[cn_A], props["chi_pauling"], props["group"], props["mass"]])
+                    if 6 in coord_dict: cations_B.append([el, ox, coord_dict[6], props["chi_pauling"], props["group"], props["mass"]])
         return cations_A, cations_B
 
     @staticmethod
     def vectorized_screening(cations_A: list, cations_B: list, r_O: float, target_a: float, delta_a: float, t_min: float, t_max: float, max_delta_chi: float, lattice_type: str) -> pd.DataFrame:
         start_time = time.time()
-        
         df_A = pd.DataFrame(cations_A, columns=['el_A', 'ox_A', 'r_A', 'chi_A', 'grp_A', 'mass_A'])
         df_B = pd.DataFrame(cations_B, columns=['el_B', 'ox_B', 'r_B', 'chi_B', 'grp_B', 'mass_B'])
-        
         df_B_left = df_B.copy()
-        df_B_right = df_B.rename(columns={
-            'el_B': 'el_Bp', 'ox_B': 'ox_Bp', 'r_B': 'r_Bp', 
-            'chi_B': 'chi_Bp', 'grp_B': 'grp_Bp', 'mass_B': 'mass_Bp'
-        })
-        
-        df_B_left['key'] = 1
-        df_B_right['key'] = 1
-        
+        df_B_right = df_B.rename(columns={'el_B': 'el_Bp', 'ox_B': 'ox_Bp', 'r_B': 'r_Bp', 'chi_B': 'chi_Bp', 'grp_B': 'grp_Bp', 'mass_B': 'mass_Bp'})
+        df_B_left['key'] = 1; df_B_right['key'] = 1
         df_BxB = pd.merge(df_B_left, df_B_right, on='key')
         df_BxB = df_BxB[df_BxB['el_B'] < df_BxB['el_Bp']]
-        
         df_BxB['req_2_ox_A'] = 12 - (df_BxB['ox_B'] + df_BxB['ox_Bp'])
         df_BxB = df_BxB[(df_BxB['req_2_ox_A'] > 0) & (df_BxB['req_2_ox_A'] % 2 == 0)]
         df_BxB['req_ox_A'] = df_BxB['req_2_ox_A'] / 2
-        
         df_A_key = df_A[['el_A', 'ox_A', 'r_A', 'chi_A', 'grp_A', 'mass_A']].copy()
         df_comb = pd.merge(df_BxB, df_A_key, left_on='req_ox_A', right_on='ox_A')
-        
         r_B_eff = (df_comb['r_B'] + df_comb['r_Bp']) / 2.0
-        
         df_comb['t'] = (df_comb['r_A'] + r_O) / (np.sqrt(2) * (r_B_eff + r_O))
         df_comb = df_comb[(df_comb['t'] >= t_min) & (df_comb['t'] <= t_max)]
-        
         df_comb['delta_chi'] = np.abs(df_comb['chi_B'] - df_comb['chi_Bp'])
         df_comb = df_comb[df_comb['delta_chi'] <= max_delta_chi]
-        
-        delta_r_BBp = np.abs(df_comb['r_B'] - df_comb['r_Bp'])
-        delta_z_BBp = np.abs(df_comb['ox_B'] - df_comb['ox_Bp'])
+        delta_r_BBp = np.abs(df_comb['r_B'] - df_comb['r_Bp']); delta_z_BBp = np.abs(df_comb['ox_B'] - df_comb['ox_Bp'])
         df_comb['order_propensity'] = (0.5 * (delta_r_BBp / 0.15) + 0.5 * (delta_z_BBp / 2.0)).clip(0.0, 1.0)
-        
-        a_A = np.sqrt(2) * (df_comb['r_A'] + r_O)
-        a_B = 2 * (r_B_eff + r_O) * np.sqrt(2)
-        df_comb['a_c'] = (a_A + a_B) / 2.0
-        
-        if lattice_type == "cubic":
-            df_comb['a_calc'] = df_comb['a_c']; df_comb['b_calc'] = df_comb['a_c']; df_comb['c_calc'] = df_comb['a_c']; df_comb['beta_calc'] = 90.0
-        elif lattice_type == "tetra":
-            df_comb['a_calc'] = df_comb['a_c']; df_comb['b_calc'] = df_comb['a_c']; df_comb['c_calc'] = df_comb['a_c'] * 1.02; df_comb['beta_calc'] = 90.0
-        elif lattice_type == "ortho":
-            df_comb['a_calc'] = df_comb['a_c'] * np.sqrt(2); df_comb['b_calc'] = df_comb['a_c'] * 2; df_comb['c_calc'] = df_comb['a_c'] * np.sqrt(2); df_comb['beta_calc'] = 90.0
-        elif lattice_type == "mono":
-            df_comb['a_calc'] = df_comb['a_c'] * np.sqrt(2); df_comb['b_calc'] = df_comb['a_c']; df_comb['c_calc'] = df_comb['a_c'] * np.sqrt(2); df_comb['beta_calc'] = 135.0
-        elif lattice_type == "hexagonal":
-            df_comb['a_calc'] = 2 * (r_B_eff + r_O); df_comb['b_calc'] = df_comb['a_calc']; df_comb['c_calc'] = df_comb['a_calc'] * np.sqrt(6); df_comb['beta_calc'] = 90.0
-
+        a_A = np.sqrt(2) * (df_comb['r_A'] + r_O); a_B = 2 * (r_B_eff + r_O) * np.sqrt(2); df_comb['a_c'] = (a_A + a_B) / 2.0
+        if lattice_type == "cubic": df_comb['a_calc'] = df_comb['a_c']; df_comb['b_calc'] = df_comb['a_c']; df_comb['c_calc'] = df_comb['a_c']; df_comb['beta_calc'] = 90.0
+        elif lattice_type == "tetra": df_comb['a_calc'] = df_comb['a_c']; df_comb['b_calc'] = df_comb['a_c']; df_comb['c_calc'] = df_comb['a_c'] * 1.02; df_comb['beta_calc'] = 90.0
+        elif lattice_type == "ortho": df_comb['a_calc'] = df_comb['a_c'] * np.sqrt(2); df_comb['b_calc'] = df_comb['a_c'] * 2; df_comb['c_calc'] = df_comb['a_c'] * np.sqrt(2); df_comb['beta_calc'] = 90.0
+        elif lattice_type == "mono": df_comb['a_calc'] = df_comb['a_c'] * np.sqrt(2); df_comb['b_calc'] = df_comb['a_c']; df_comb['c_calc'] = df_comb['a_c'] * np.sqrt(2); df_comb['beta_calc'] = 135.0
+        elif lattice_type == "hexagonal": df_comb['a_calc'] = 2 * (r_B_eff + r_O); df_comb['b_calc'] = df_comb['a_calc']; df_comb['c_calc'] = df_comb['a_calc'] * np.sqrt(6); df_comb['beta_calc'] = 90.0
         df_comb = df_comb[np.abs(df_comb['a_calc'] - target_a) <= delta_a]
-        
-        mu = r_B_eff / r_O
-        score_t = np.exp(-5.0 * np.abs(1.0 - df_comb['t']))
-        score_mu = np.exp(-5.0 * np.abs(0.85 - mu))
+        mu = r_B_eff / r_O; score_t = np.exp(-5.0 * np.abs(1.0 - df_comb['t'])); score_mu = np.exp(-5.0 * np.abs(0.85 - mu))
         df_comb['stability_score'] = (0.7 * (score_t * score_mu) + 0.3 * df_comb['order_propensity']).round(3)
-        
         df_comb['Formule'] = df_comb['el_A'] + '2' + df_comb['el_B'] + df_comb['el_Bp'] + 'O6'
-        df_comb['d_e(B)'] = np.clip(df_comb['grp_B'] - df_comb['ox_B'], 0, 10)
-        df_comb['d_e(Bp)'] = np.clip(df_comb['grp_Bp'] - df_comb['ox_Bp'], 0, 10)
-        
-        mass_O = ELEMENT_DB['O']['mass']
-        chi_O = ELEMENT_DB['O']['chi_pauling']
+        df_comb['d_e(B)'] = np.clip(df_comb['grp_B'] - df_comb['ox_B'], 0, 10); df_comb['d_e(Bp)'] = np.clip(df_comb['grp_Bp'] - df_comb['ox_Bp'], 0, 10)
+        mass_O = ELEMENT_DB['O']['mass']; chi_O = ELEMENT_DB['O']['chi_pauling']
         df_comb['mean_atomic_mass'] = (2 * df_comb['mass_A'] + df_comb['mass_B'] + df_comb['mass_Bp'] + 6 * mass_O) / 10.0
         df_comb['mean_chi'] = (2 * df_comb['chi_A'] + df_comb['chi_B'] + df_comb['chi_Bp'] + 6 * chi_O) / 10.0
-        
-        cols = ['Formule', 'el_A', 'el_B', 'el_Bp', 'ox_A', 'ox_B', 'ox_Bp',
-                't', 'a_calc', 'b_calc', 'c_calc', 'beta_calc', 'stability_score', 
-                'order_propensity', 'delta_chi', 'd_e(B)', 'd_e(Bp)', 'mean_atomic_mass', 'mean_chi']
-        
-        df_final = df_comb[cols].copy()
-        df_final.rename(columns={'ox_A': 'Ox_A', 'ox_B': 'Ox_B', 'ox_Bp': 'Ox_Bp'}, inplace=True)
-        
-        # CORRECTION DU BUG ICI
+        cols = ['Formule', 'el_A', 'el_B', 'el_Bp', 'ox_A', 'ox_B', 'ox_Bp', 't', 'a_calc', 'b_calc', 'c_calc', 'beta_calc', 'stability_score', 'order_propensity', 'delta_chi', 'd_e(B)', 'd_e(Bp)', 'mean_atomic_mass', 'mean_chi']
+        df_final = df_comb[cols].copy(); df_final.rename(columns={'ox_A': 'Ox_A', 'ox_B': 'Ox_B', 'ox_Bp': 'Ox_Bp'}, inplace=True)
         st.session_state.exec_time = time.time() - start_time
         return df_final.reset_index(drop=True)
 
@@ -213,110 +158,17 @@ class HTEngine:
 # 4. GÉNÉRATEURS DE FICHIERS EXPERTS
 # ==============================================================================
 def generate_cif(row: pd.Series, sg: str) -> str:
-    formula = row['Formule']
-    a, b, c, beta = row['a_calc'], row['b_calc'], row['c_calc'], row['beta_calc']
-    wyckoff = f"""
-loop_
-_atom_site_label
-_atom_site_type_symbol
-_atom_site_fract_x
-_atom_site_fract_y
-_atom_site_fract_z
-A1 {row['el_A']} 0.25 0.25 0.25
-A2 {row['el_A']} 0.75 0.75 0.75
-B1 {row['el_B']} 0.0 0.0 0.0
-Bp1 {row['el_Bp']} 0.5 0.5 0.5
-O1 O 0.25 0.0 0.0
-O2 O 0.0 0.25 0.0
-O3 O 0.0 0.0 0.25
-O4 O 0.75 0.5 0.5
-O5 O 0.5 0.75 0.5
-O6 O 0.5 0.5 0.75
-"""
-    return f"""data_{formula}
-_chemical_formula_sum '{formula}'
-_symmetry_space_group_name_H-M '{sg}'
-_cell_length_a {a:.4f}
-_cell_length_b {b:.4f}
-_cell_length_c {c:.4f}
-_cell_angle_alpha 90.0
-_cell_angle_beta {beta:.4f}
-_cell_angle_gamma 90.0
-{wyckoff}
-"""
+    formula = row['Formule']; a, b, c, beta = row['a_calc'], row['b_calc'], row['c_calc'], row['beta_calc']
+    wyckoff = f"\nloop_\n_atom_site_label\n_atom_site_type_symbol\n_atom_site_fract_x\n_atom_site_fract_y\n_atom_site_fract_z\nA1 {row['el_A']} 0.25 0.25 0.25\nA2 {row['el_A']} 0.75 0.75 0.75\nB1 {row['el_B']} 0.0 0.0 0.0\nBp1 {row['el_Bp']} 0.5 0.5 0.5\nO1 O 0.25 0.0 0.0\nO2 O 0.0 0.25 0.0\nO3 O 0.0 0.0 0.25\nO4 O 0.75 0.5 0.5\nO5 O 0.5 0.75 0.5\nO6 O 0.5 0.5 0.75\n"
+    return f"""data_{formula}\n_chemical_formula_sum '{formula}'\n_symmetry_space_group_name_H-M '{sg}'\n_cell_length_a {a:.4f}\n_cell_length_b {b:.4f}\n_cell_length_c {c:.4f}\n_cell_angle_alpha 90.0\n_cell_angle_beta {beta:.4f}\n_cell_angle_gamma 90.0\n{wyckoff}\n"""
 
 def generate_poscar(row: pd.Series) -> str:
-    a, b, c, beta = row['a_calc'], row['b_calc'], row['c_calc'], row['beta_calc']
-    beta_rad = np.deg2rad(beta)
-    ax, bx, by = a, 0.0, b
-    cx, cy, cz = c * np.cos(beta_rad), 0.0, c * np.sin(beta_rad)
-    return f"""{row['Formule']}
-1.0
-{ax:.6f} 0.000000 0.000000
-{bx:.6f} {by:.6f} 0.000000
-{cx:.6f} {cy:.6f} {cz:.6f}
-{row['el_A']} {row['el_B']} {row['el_Bp']} O
-2 1 1 6
-Direct
-0.250000 0.250000 0.250000
-0.750000 0.750000 0.750000
-0.000000 0.000000 0.000000
-0.500000 0.500000 0.500000
-0.250000 0.000000 0.000000
-0.000000 0.250000 0.000000
-0.000000 0.000000 0.250000
-0.750000 0.500000 0.500000
-0.500000 0.750000 0.500000
-0.500000 0.500000 0.750000
-"""
+    a, b, c, beta = row['a_calc'], row['b_calc'], row['c_calc'], row['beta_calc']; beta_rad = np.deg2rad(beta); ax, bx, by = a, 0.0, b; cx, cy, cz = c * np.cos(beta_rad), 0.0, c * np.sin(beta_rad)
+    return f"""{row['Formule']}\n1.0\n{ax:.6f} 0.000000 0.000000\n{bx:.6f} {by:.6f} 0.000000\n{cx:.6f} {cy:.6f} {cz:.6f}\n{row['el_A']} {row['el_B']} {row['el_Bp']} O\n2 1 1 6\nDirect\n0.250000 0.250000 0.250000\n0.750000 0.750000 0.750000\n0.000000 0.000000 0.000000\n0.500000 0.500000 0.500000\n0.250000 0.000000 0.000000\n0.000000 0.250000 0.000000\n0.000000 0.000000 0.250000\n0.750000 0.500000 0.500000\n0.500000 0.750000 0.500000\n0.500000 0.500000 0.750000\n"""
 
 def generate_qe_input(row: pd.Series) -> str:
-    formula = row['Formule']
-    a, b, c, beta = row['a_calc'], row['b_calc'], row['c_calc'], row['beta_calc']
-    beta_rad = np.deg2rad(beta)
-    ax, bx, by = a, 0.0, b
-    cx, cy, cz = c * np.cos(beta_rad), 0.0, c * np.sin(beta_rad)
-    el_A, el_B, el_Bp = row['el_A'], row['el_B'], row['el_Bp']
-    return f"""&control
-  calculation = 'scf'
-  prefix = '{formula}'
-  pseudo_dir = './pseudo/'
-  outdir = './out/'
-/
-&system
-  ibrav = 0, nat = 10, ntyp = 4,
-  ecutwfc = 60.0, ecutrho = 480.0,
-  occupations = 'smearing', smearing = 'm-p', degauss = 0.02
-/
-&electrons
-  conv_thr = 1.0d-8
-/
-CELL_PARAMETERS angstrom
-  {ax:.6f}  0.000000  0.000000
-  {bx:.6f}  {by:.6f}  0.000000
-  {cx:.6f}  {cy:.6f}  {cz:.6f}
-
-ATOMIC_SPECIES
-  {el_A}  {ELEMENT_DB[el_A]['mass']}  {el_A}.pbe-spn-kjpaw_psl.1.0.0.UPF
-  {el_B}  {ELEMENT_DB[el_B]['mass']}  {el_B}.pbe-spn-kjpaw_psl.1.0.0.UPF
-  {el_Bp} {ELEMENT_DB[el_Bp]['mass']} {el_Bp}.pbe-spn-kjpaw_psl.1.0.0.UPF
-  O   15.9990  O.pbe-n-kjpaw_psl.1.0.0.UPF
-
-ATOMIC_POSITIONS crystal
-  {el_A}   0.250000  0.250000  0.250000
-  {el_A}   0.750000  0.750000  0.750000
-  {el_B}   0.000000  0.000000  0.000000
-  {el_Bp}  0.500000  0.500000  0.500000
-  O    0.250000  0.000000  0.000000
-  O    0.000000  0.250000  0.000000
-  O    0.000000  0.000000  0.250000
-  O    0.750000  0.500000  0.500000
-  O    0.500000  0.750000  0.500000
-  O    0.500000  0.500000  0.750000
-
-K_POINTS automatic
-  4 4 4 1 1 0
-"""
+    formula = row['Formule']; a, b, c, beta = row['a_calc'], row['b_calc'], row['c_calc'], row['beta_calc']; beta_rad = np.deg2rad(beta); ax, bx, by = a, 0.0, b; cx, cy, cz = c * np.cos(beta_rad), 0.0, c * np.sin(beta_rad); el_A, el_B, el_Bp = row['el_A'], row['el_B'], row['el_Bp']
+    return f"""&control\n  calculation = 'scf'\n  prefix = '{formula}'\n  pseudo_dir = './pseudo/'\n  outdir = './out/'\n/\n&system\n  ibrav = 0, nat = 10, ntyp = 4,\n  ecutwfc = 60.0, ecutrho = 480.0,\n  occupations = 'smearing', smearing = 'm-p', degauss = 0.02\n/\n&electrons\n  conv_thr = 1.0d-8\n/\nCELL_PARAMETERS angstrom\n  {ax:.6f}  0.000000  0.000000\n  {bx:.6f}  {by:.6f}  0.000000\n  {cx:.6f}  {cy:.6f}  {cz:.6f}\n\nATOMIC_SPECIES\n  {el_A}  {ELEMENT_DB[el_A]['mass']}  {el_A}.pbe-spn-kjpaw_psl.1.0.0.UPF\n  {el_B}  {ELEMENT_DB[el_B]['mass']}  {el_B}.pbe-spn-kjpaw_psl.1.0.0.UPF\n  {el_Bp} {ELEMENT_DB[el_Bp]['mass']} {el_Bp}.pbe-spn-kjpaw_psl.1.0.0.UPF\n  O   15.9990  O.pbe-n-kjpaw_psl.1.0.0.UPF\n\nATOMIC_POSITIONS crystal\n  {el_A}   0.250000  0.250000  0.250000\n  {el_A}   0.750000  0.750000  0.750000\n  {el_B}   0.000000  0.000000  0.000000\n  {el_Bp}  0.500000  0.500000  0.500000\n  O    0.250000  0.000000  0.000000\n  O    0.000000  0.250000  0.000000\n  O    0.000000  0.000000  0.250000\n  O    0.750000  0.500000  0.500000\n  O    0.500000  0.750000  0.500000\n  O    0.500000  0.500000  0.750000\n\nK_POINTS automatic\n  4 4 4 1 1 0\n"""
 
 # ==============================================================================
 # 5. INTERFACE UTILISATEUR (STREAMLIT UI/UX)
@@ -326,7 +178,9 @@ def main():
     st.markdown("<style> .stApp { background-color: #0e1117; color: #fafafa; } .stButton>button { border-radius: 8px; transition: all 0.3s ease; } .stButton>button:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.3); } </style>", unsafe_allow_html=True)
     
     st.title("⚛️ Intelligent HTS A₂BB'O6 Engine & ML Toolkit")
-    st.caption("Auto-Paramétrage Physique | Vectorisation Pandas | Quantum ESPRESSO | DeepXDE")
+    st.caption("Auto-Paramétrage | Optimisation Locale | Vectorisation Pandas | Quantum ESPRESSO | DeepXDE")
+
+    if 'auto_run' not in st.session_state: st.session_state.auto_run = False
 
     with st.sidebar:
         st.header("⚙️ Configuration")
@@ -341,25 +195,18 @@ def main():
         all_elements = sorted([el for el in ELEMENT_DB.keys() if el != "O"])
         forbidden_elements = st.multiselect("🛑 Exclure Éléments", all_elements, default=[])
         
-        # --- LOGIQUE INTELLIGENTE ---
         auto_target_a, auto_delta_a = HTEngine.calculate_dynamic_bounds(config['cn_A'], config['lattice'], forbidden_elements)
         
-        if 'last_struct_family' not in st.session_state:
-            st.session_state.last_struct_family = struct_family
-        if 'last_forbidden' not in st.session_state:
-            st.session_state.last_forbidden = tuple(forbidden_elements)
-            
+        if 'last_struct_family' not in st.session_state: st.session_state.last_struct_family = struct_family
+        if 'last_forbidden' not in st.session_state: st.session_state.last_forbidden = tuple(forbidden_elements)
         if st.session_state.last_struct_family != struct_family or st.session_state.last_forbidden != tuple(forbidden_elements):
-            st.session_state.target_a = auto_target_a
-            st.session_state.delta_a = auto_delta_a
-            st.session_state.last_struct_family = struct_family
-            st.session_state.last_forbidden = tuple(forbidden_elements)
+            st.session_state.target_a = auto_target_a; st.session_state.delta_a = auto_delta_a; st.session_state.last_struct_family = struct_family; st.session_state.last_forbidden = tuple(forbidden_elements)
             
         if 'target_a' not in st.session_state: st.session_state.target_a = auto_target_a
         if 'delta_a' not in st.session_state: st.session_state.delta_a = auto_delta_a
         
-        st.subheader("📏 Paramètre de Maille (Auto-Optimisé)")
-        st.caption(f"Plage estimée par rayons ioniques : **a ≈ {auto_target_a:.2f} ± {auto_delta_a:.2f} Å**")
+        st.subheader("📏 Paramètre de Maille")
+        st.caption(f"Plage estimée : **a ≈ {auto_target_a:.2f} ± {auto_delta_a:.2f} Å**")
         
         target_a = st.number_input("Valeur cible 'a' (Å)", min_value=3.0, max_value=20.0, value=st.session_state.target_a, step=0.05, key='target_a')
         delta_a = st.slider("Marge ±Δa (Å)", 0.01, 3.0, value=st.session_state.delta_a, step=0.01, key='delta_a')
@@ -373,21 +220,18 @@ def main():
         st.markdown("---")
         generate_btn = st.button("🚀 LANCER LE CRIBLAGE", type="primary", use_container_width=True)
 
-    if generate_btn:
+    # --- LOGIQUE D'EXECUTION ---
+    if generate_btn or st.session_state.auto_run:
+        st.session_state.auto_run = False # Reset flag
         with st.spinner("⏳ Exécution du moteur vectorisé..."):
-            cn_A = config['cn_A']
-            lattice_type = config['lattice']
-            r_O = ELEMENT_DB["O"]["radii"][-2][6]
-            
+            cn_A = config['cn_A']; lattice_type = config['lattice']; r_O = ELEMENT_DB["O"]["radii"][-2][6]
             cations_A, cations_B = HTEngine.extract_cations(cn_A, forbidden_elements)
             df_results = HTEngine.vectorized_screening(cations_A, cations_B, r_O, target_a, delta_a, t_min, t_max, max_delta_chi, lattice_type)
-            
-            df_results = df_results[df_results['stability_score'] >= min_stability]
-            df_results = df_results.sort_values(by='stability_score', ascending=False)
-            
+            df_results = df_results[df_results['stability_score'] >= min_stability].sort_values(by='stability_score', ascending=False)
             st.session_state.df_results = df_results
             st.session_state.config = config
 
+    # --- AFFICHAGE DES RESULTATS ---
     if "df_results" in st.session_state and not st.session_state.df_results.empty:
         df = st.session_state.df_results
         config = st.session_state.config
@@ -395,8 +239,8 @@ def main():
         
         st.success(f"✅ **{len(df)}** combinaisons trouvées en **{exec_time:.4f} secondes**.")
         
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
-            "📊 Données & Ordre B/B'", "📈 Visualisations 3D", "💾 Export Fichiers (CIF/POSCAR/QE)", "🤖 Export DeepXDE / ML", "📦 Archive ZIP Complète (DFT)"
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+            "📊 Données & Ordre", "📈 Visualisations 3D", "💾 Export Fichiers", "🤖 Export ML", "📦 Archive ZIP", "🎯 Optimisation Locale"
         ])
         
         with tab1:
@@ -406,9 +250,7 @@ def main():
                     "t": st.column_config.ProgressColumn("Tolérance (t)", min_value=t_min, max_value=t_max, format="%.4f"),
                     "order_propensity": st.column_config.ProgressColumn("Ordre B/B'", min_value=0.0, max_value=1.0, format="%.3f"),
                     "stability_score": st.column_config.ProgressColumn("Score Global", min_value=0.0, max_value=1.0, format="%.3f"),
-                    "a_calc": st.column_config.NumberColumn("a (Å)", format="%.4f"),
-                    "b_calc": st.column_config.NumberColumn("b (Å)", format="%.4f"),
-                    "c_calc": st.column_config.NumberColumn("c (Å)", format="%.4f"),
+                    "a_calc": st.column_config.NumberColumn("a (Å)", format="%.4f"), "b_calc": st.column_config.NumberColumn("b (Å)", format="%.4f"), "c_calc": st.column_config.NumberColumn("c (Å)", format="%.4f"),
                 })
             
         with tab2:
@@ -452,6 +294,31 @@ def main():
                     zf.writestr(f"Quantum_ESPRESSO/{row['Formule']}.scf.in", generate_qe_input(row))
                 zf.writestr("Screening_Results_and_ML_Features.csv", df.to_csv(index=False))
             st.download_button("⬇️ Archive Complète (ZIP)", zip_buffer.getvalue(), f"HTS_A2BBO6_Archive_{config['sg']}.zip", mime="application/zip", use_container_width=True)
+            
+        with tab6:
+            st.subheader("🎯 Optimisation et Exploration Locale")
+            st.markdown("Sélectionnez une structure de référence parmi les résultats. L'optimisation va définir son paramètre de maille calculé (`a_calc`) comme nouvelle cible et relancer une recherche élargie pour découvrir des **structures alternatives ou métastables** voisines.")
+            
+            selected_formula = st.selectbox("Sélectionnez une structure de référence :", df['Formule'].values, key='opt_select')
+            selected_row = df[df['Formule'] == selected_formula].iloc[0]
+            
+            c_opt1, c_opt2, c_opt3 = st.columns(3)
+            with c_opt1:
+                st.metric("Structure Source", selected_formula)
+            with c_opt2:
+                st.metric("Paramètre a_calc (Å)", f"{selected_row['a_calc']:.4f}")
+            with c_opt3:
+                st.metric("Score de Stabilité", f"{selected_row['stability_score']:.3f}")
+                
+            st.markdown("---")
+            opt_delta = st.slider("Marge d'exploration ∆a autour de la cible (Å)", 0.05, 1.0, 0.3, step=0.05, help="Une marge plus grande trouvera plus de voisins, mais ils pourraient être moins stables.")
+            
+            if st.button("🚀 OPTIMISER AUTOUR DE CETTE STRUCTURE", type="primary", use_container_width=True):
+                # Mise à jour dynamique des cibles et déclenchement
+                st.session_state.target_a = selected_row['a_calc']
+                st.session_state.delta_a = opt_delta
+                st.session_state.auto_run = True
+                st.rerun()
             
     elif "df_results" in st.session_state and st.session_state.df_results.empty:
         st.error("❌ Aucune combinaison ne satisfait vos critères stricts.")
