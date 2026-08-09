@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 =============================================================================
- HIGH-THROUGHPUT MATERIAL SCREENING ENGINE - A2BB'O6 | V5.0 PRODUCTION-GRADE
- Inclus : Dynamique UI, QE .scf.in, Ordre B/B', Descripteurs ML/DeepXDE
+ HIGH-THROUGHPUT MATERIAL SCREENING ENGINE - A2BB'O6 | V6.0 INTELLIGENT
+ Inclus : Auto-Paramétrage, QE .scf.in, Ordre B/B', Descripteurs ML/DeepXDE
 =============================================================================
 """
 
@@ -14,14 +14,13 @@ import io
 import zipfile
 import plotly.express as px
 import time
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 # ==============================================================================
-# 1. BASE DE DONNÉES LOCALE ULTIME (Shannon + Pauling + Propriétés)
+# 1. BASE DE DONNÉES LOCALE ULTIME
 # ==============================================================================
 ELEMENT_DB = {
     "O":  {"radii": {-2: {2: 1.35, 3: 1.36, 4: 1.38, 6: 1.40, 8: 1.42, 12: 1.44}}, "chi_pauling": 3.44, "group": 16, "mass": 15.999},
-    # Site A
     "Ca": {"radii": {2: {6: 1.00, 8: 1.12, 12: 1.34}}, "chi_pauling": 1.00, "group": 2, "mass": 40.078},
     "Sr": {"radii": {2: {6: 1.18, 8: 1.26, 12: 1.44}}, "chi_pauling": 0.95, "group": 2, "mass": 87.62},
     "Ba": {"radii": {2: {6: 1.35, 8: 1.42, 12: 1.61}}, "chi_pauling": 0.89, "group": 2, "mass": 137.327},
@@ -32,7 +31,6 @@ ELEMENT_DB = {
     "Nd": {"radii": {3: {6: 0.983, 8: 1.109, 12: 1.31}}, "chi_pauling": 1.14, "group": 3, "mass": 144.242},
     "Sm": {"radii": {3: {6: 0.958, 8: 1.079, 12: 1.28}}, "chi_pauling": 1.17, "group": 3, "mass": 150.36},
     "Bi": {"radii": {3: {6: 1.03, 8: 1.17, 12: 1.38}}, "chi_pauling": 2.02, "group": 15, "mass": 208.980},
-    # Sites B et B'
     "Sc": {"radii": {3: {6: 0.745}}, "chi_pauling": 1.36, "group": 3, "mass": 44.956},
     "Ti": {"radii": {3: {6: 0.67}, 4: {6: 0.605}}, "chi_pauling": 1.54, "group": 4, "mass": 47.867},
     "V":  {"radii": {3: {6: 0.64}, 4: {6: 0.58}, 5: {6: 0.54}}, "chi_pauling": 1.63, "group": 5, "mass": 50.941},
@@ -61,24 +59,63 @@ ELEMENT_DB = {
 }
 
 # ==============================================================================
-# 2. CONFIGURATION DYNAMIQUE DES STRUCTURES AVEC PARAMÈTRES PAR DÉFAUT
+# 2. CONFIGURATION DYNAMIQUE DES STRUCTURES
 # ==============================================================================
 STRUCTURE_CONFIG = {
     "Double Pérovskite": {
-        "Cubique (Fm-3m)": {"sg": "Fm-3m", "cn_A": 12, "lattice": "cubic", "default_a": 8.0, "default_delta_a": 0.5},
-        "Tétragonale (I4/m)": {"sg": "I4/m", "cn_A": 8, "lattice": "tetra", "default_a": 5.6, "default_delta_a": 0.5},
-        "Orthorhombique (Pnma)": {"sg": "Pnma", "cn_A": 8, "lattice": "ortho", "default_a": 5.5, "default_delta_a": 0.3},
-        "Monoclinique (P2_1/n)": {"sg": "P2_1/n", "cn_A": 8, "lattice": "mono", "default_a": 5.5, "default_delta_a": 0.3}
+        "Cubique (Fm-3m)": {"sg": "Fm-3m", "cn_A": 12, "lattice": "cubic"},
+        "Tétragonale (I4/m)": {"sg": "I4/m", "cn_A": 8, "lattice": "tetra"},
+        "Orthorhombique (Pnma)": {"sg": "Pnma", "cn_A": 8, "lattice": "ortho"},
+        "Monoclinique (P2_1/n)": {"sg": "P2_1/n", "cn_A": 8, "lattice": "mono"}
     },
     "Corindon / Ilménite": {
-        "Rhomboédrique (R-3)": {"sg": "R-3", "cn_A": 6, "lattice": "hexagonal", "default_a": 5.0, "default_delta_a": 0.3}
+        "Rhomboédrique (R-3)": {"sg": "R-3", "cn_A": 6, "lattice": "hexagonal"}
     }
 }
 
 # ==============================================================================
-# 3. MOTEUR VECTORISÉ ET CRISTALLOGRAPHIQUE AVANCÉ
+# 3. MOTEUR VECTORISÉ ET INTELLIGENT
 # ==============================================================================
 class HTEngine:
+    @staticmethod
+    def calculate_dynamic_bounds(cn_A: int, lattice_type: str, forbidden: list) -> Tuple[float, float]:
+        """Calcule intelligemment la valeur cible 'a' et la marge ∆a basées sur les rayons moyens."""
+        r_O = ELEMENT_DB["O"]["radii"][-2][6]
+        r_A_list, r_B_list = [], []
+        
+        for el, props in ELEMENT_DB.items():
+            if el in forbidden or el == "O": continue
+            for ox, coord_dict in props["radii"].items():
+                if ox > 0:
+                    if cn_A in coord_dict: r_A_list.append(coord_dict[cn_A])
+                    if 6 in coord_dict: r_B_list.append(coord_dict[6])
+                    
+        if not r_A_list or not r_B_list:
+            return 8.0, 2.0 # Fallback si base vide
+            
+        min_r_A, max_r_A = min(r_A_list), max(r_A_list)
+        min_r_B, max_r_B = min(r_B_list), max(r_B_list)
+        mean_r_A, mean_r_B = np.mean(r_A_list), np.mean(r_B_list)
+        
+        def calc_a_c(r_A, r_B):
+            a_A = np.sqrt(2) * (r_A + r_O)
+            a_B = 2 * (r_B + r_O) * np.sqrt(2)
+            return (a_A + a_B) / 2.0
+            
+        def transform_a(a_c, r_B, l_type):
+            if l_type in ["cubic", "tetra"]: return a_c
+            elif l_type in ["ortho", "mono"]: return a_c * np.sqrt(2)
+            elif l_type == "hexagonal": return 2 * (r_B + r_O)
+            
+        mean_a = transform_a(calc_a_c(mean_r_A, mean_r_B), mean_r_B, lattice_type)
+        min_a = transform_a(calc_a_c(min_r_A, min_r_B), min_r_B, lattice_type)
+        max_a = transform_a(calc_a_c(max_r_A, max_r_B), max_r_B, lattice_type)
+        
+        # La marge couvre confortablement l'étendue des possibles
+        default_delta_a = round(max(0.5, (max_a - min_a) / 2.0 + 0.2), 2)
+        
+        return round(mean_a, 3), default_delta_a
+
     @staticmethod
     def extract_cations(cn_A: int, forbidden: list) -> tuple:
         cations_A, cations_B = [], []
@@ -135,30 +172,15 @@ class HTEngine:
         df_comb['a_c'] = (a_A + a_B) / 2.0
         
         if lattice_type == "cubic":
-            df_comb['a_calc'] = df_comb['a_c']
-            df_comb['b_calc'] = df_comb['a_c']
-            df_comb['c_calc'] = df_comb['a_c']
-            df_comb['beta_calc'] = 90.0
+            df_comb['a_calc'] = df_comb['a_c']; df_comb['b_calc'] = df_comb['a_c']; df_comb['c_calc'] = df_comb['a_c']; df_comb['beta_calc'] = 90.0
         elif lattice_type == "tetra":
-            df_comb['a_calc'] = df_comb['a_c']
-            df_comb['b_calc'] = df_comb['a_c']
-            df_comb['c_calc'] = df_comb['a_c'] * 1.02
-            df_comb['beta_calc'] = 90.0
+            df_comb['a_calc'] = df_comb['a_c']; df_comb['b_calc'] = df_comb['a_c']; df_comb['c_calc'] = df_comb['a_c'] * 1.02; df_comb['beta_calc'] = 90.0
         elif lattice_type == "ortho":
-            df_comb['a_calc'] = df_comb['a_c'] * np.sqrt(2)
-            df_comb['b_calc'] = df_comb['a_c'] * 2
-            df_comb['c_calc'] = df_comb['a_c'] * np.sqrt(2)
-            df_comb['beta_calc'] = 90.0
+            df_comb['a_calc'] = df_comb['a_c'] * np.sqrt(2); df_comb['b_calc'] = df_comb['a_c'] * 2; df_comb['c_calc'] = df_comb['a_c'] * np.sqrt(2); df_comb['beta_calc'] = 90.0
         elif lattice_type == "mono":
-            df_comb['a_calc'] = df_comb['a_c'] * np.sqrt(2)
-            df_comb['b_calc'] = df_comb['a_c']
-            df_comb['c_calc'] = df_comb['a_c'] * np.sqrt(2)
-            df_comb['beta_calc'] = 135.0
+            df_comb['a_calc'] = df_comb['a_c'] * np.sqrt(2); df_comb['b_calc'] = df_comb['a_c']; df_comb['c_calc'] = df_comb['a_c'] * np.sqrt(2); df_comb['beta_calc'] = 135.0
         elif lattice_type == "hexagonal":
-            df_comb['a_calc'] = 2 * (r_B_eff + r_O)
-            df_comb['b_calc'] = df_comb['a_calc']
-            df_comb['c_calc'] = df_comb['a_calc'] * np.sqrt(6)
-            df_comb['beta_calc'] = 90.0
+            df_comb['a_calc'] = 2 * (r_B_eff + r_O); df_comb['b_calc'] = df_comb['a_calc']; df_comb['c_calc'] = df_comb['a_calc'] * np.sqrt(6); df_comb['beta_calc'] = 90.0
 
         df_comb = df_comb[np.abs(df_comb['a_calc'] - target_a) <= delta_a]
         
@@ -183,7 +205,7 @@ class HTEngine:
         df_final = df_comb[cols].copy()
         df_final.rename(columns={'ox_A': 'Ox_A', 'ox_B': 'Ox_B', 'ox_Bp': 'Ox_Bp'}, inplace=True)
         
-        st.session_state.exec_time = time.time() - start_time
+        st.sessionC_state.exec_time = time.time() - start_time
         return df_final.reset_index(drop=True)
 
 # ==============================================================================
@@ -227,7 +249,6 @@ def generate_poscar(row: pd.Series) -> str:
     beta_rad = np.deg2rad(beta)
     ax, bx, by = a, 0.0, b
     cx, cy, cz = c * np.cos(beta_rad), 0.0, c * np.sin(beta_rad)
-    
     return f"""{row['Formule']}
 1.0
 {ax:.6f} 0.000000 0.000000
@@ -255,25 +276,19 @@ def generate_qe_input(row: pd.Series) -> str:
     ax, bx, by = a, 0.0, b
     cx, cy, cz = c * np.cos(beta_rad), 0.0, c * np.sin(beta_rad)
     el_A, el_B, el_Bp = row['el_A'], row['el_B'], row['el_Bp']
-    
     return f"""&control
   calculation = 'scf'
-  restart_mode = 'from_scratch'
   prefix = '{formula}'
   pseudo_dir = './pseudo/'
   outdir = './out/'
 /
 &system
   ibrav = 0, nat = 10, ntyp = 4,
-  ecutwfc = 60.0,
-  ecutrho = 480.0,
-  occupations = 'smearing',
-  smearing = 'm-p',
-  degauss = 0.02
+  ecutwfc = 60.0, ecutrho = 480.0,
+  occupations = 'smearing', smearing = 'm-p', degauss = 0.02
 /
 &electrons
   conv_thr = 1.0d-8
-  mixing_beta = 0.4
 /
 CELL_PARAMETERS angstrom
   {ax:.6f}  0.000000  0.000000
@@ -306,56 +321,59 @@ K_POINTS automatic
 # 5. INTERFACE UTILISATEUR (STREAMLIT UI/UX)
 # ==============================================================================
 def main():
-    st.set_page_config(page_title="⚛️ HTS A2BB'O6 Production V5", layout="wide", initial_sidebar_state="expanded")
+    st.set_page_config(page_title="⚛️ HTS A2BB'O6 Intelligent", layout="wide", initial_sidebar_state="expanded")
     st.markdown("<style> .stApp { background-color: #0e1117; color: #fafafa; } .stButton>button { border-radius: 8px; transition: all 0.3s ease; } .stButton>button:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.3); } </style>", unsafe_allow_html=True)
     
-    st.title("⚛️ Production-Grade HTS A₂BB'O6 Engine & ML Toolkit")
-    st.caption("Vectorisation Pandas | Analyse d'Ordre B/B' | Quantum ESPRESSO (.in) | Export DeepXDE / ML")
+    st.title("⚛️ Intelligent HTS A₂BB'O6 Engine & ML Toolkit")
+    st.caption("Auto-Paramétrage Physique | Vectorisation Pandas | Quantum ESPRESSO | DeepXDE")
 
     with st.sidebar:
-        st.header("⚙️ Configuration Avancée")
+        st.header("⚙️ Configuration")
         struct_type = st.selectbox("🏗️ Type de Structure", list(STRUCTURE_CONFIG.keys()))
         available_families = list(STRUCTURE_CONFIG[struct_type].keys())
         struct_family = st.selectbox("🔬 Famille / Groupe d'espace", available_families)
         
         config = STRUCTURE_CONFIG[struct_type][struct_family]
-        st.info(f"Coordination Site A dynamique : **CN = {config['cn_A']}**\nGéométrie : **{config['lattice']}**")
-        
-        st.markdown("---")
-        st.subheader("📏 Cible Paramètre de Maille (a)")
-        
-        # LOGIQUE DYNAMIQUE : Mise à jour intelligente des paramètres par défaut
-        if 'last_struct_family' not in st.session_state:
-            st.session_state.last_struct_family = struct_family
-            
-        if st.session_state.last_struct_family != struct_family:
-            st.session_state.target_a = config['default_a']
-            st.session_state.delta_a = config['default_delta_a']
-            st.session_state.last_struct_family = struct_family
-            
-        if 'target_a' not in st.session_state:
-            st.session_state.target_a = config['default_a']
-        if 'delta_a' not in st.session_state:
-            st.session_state.delta_a = config['default_delta_a']
-            
-        target_a = st.number_input("Valeur cible 'a' (Å)", min_value=3.0, max_value=20.0, value=st.session_state.target_a, step=0.05, key='target_a')
-        delta_a = st.slider("Marge ±Δa (Å)", 0.01, 2.0, value=st.session_state.delta_a, step=0.01, key='delta_a', help="Ajusté automatiquement au changement de structure.")
-        
-        st.markdown("---")
-        st.subheader("🧪 Filtres Physico-Chimiques & Ordre")
-        t_min, t_max = st.slider("Plage Tolérance (t)", 0.80, 1.10, (0.90, 1.05), step=0.01)
-        max_delta_chi = st.slider("Δχ max (Stabilité Redox)", 0.0, 3.0, 2.0, step=0.1)
-        min_stability = st.slider("Score Stabilité & Ordre Min", 0.0, 1.0, 0.4, step=0.05, help="Combine tolérance, facteur octaédrique et propension à l'ordre B/B'.")
+        st.info(f"Coordination Site A : **CN = {config['cn_A']}** | Géométrie : **{config['lattice']}**")
         
         st.markdown("---")
         all_elements = sorted([el for el in ELEMENT_DB.keys() if el != "O"])
         forbidden_elements = st.multiselect("🛑 Exclure Éléments", all_elements, default=[])
         
+        # --- LOGIQUE INTELLIGENTE ---
+        auto_target_a, auto_delta_a = HTEngine.calculate_dynamic_bounds(config['cn_A'], config['lattice'], forbidden_elements)
+        
+        if 'last_struct_family' not in st.session_state:
+            st.session_state.last_struct_family = struct_family
+        if 'last_forbidden' not in st.session_state:
+            st.session_state.last_forbidden = tuple(forbidden_elements)
+            
+        if st.session_state.last_struct_family != struct_family or st.session_state.last_forbidden != tuple(forbidden_elements):
+            st.session_state.target_a = auto_target_a
+            st.session_state.delta_a = auto_delta_a
+            st.session_state.last_struct_family = struct_family
+            st.session_state.last_forbidden = tuple(forbidden_elements)
+            
+        if 'target_a' not in st.session_state: st.session_state.target_a = auto_target_a
+        if 'delta_a' not in st.session_state: st.session_state.delta_a = auto_delta_a
+        
+        st.subheader("📏 Paramètre de Maille (Auto-Optimisé)")
+        st.caption(f"Plage estimée par rayons ioniques : **a ≈ {auto_target_a:.2f} ± {auto_delta_a:.2f} Å**")
+        
+        target_a = st.number_input("Valeur cible 'a' (Å)", min_value=3.0, max_value=20.0, value=st.session_state.target_a, step=0.05, key='target_a')
+        delta_a = st.slider("Marge ±Δa (Å)", 0.01, 3.0, value=st.session_state.delta_a, step=0.01, key='delta_a')
+        
         st.markdown("---")
-        generate_btn = st.button("🚀 LANCER LE CRIBLAGE EXPERT", type="primary", use_container_width=True)
+        st.subheader("🧪 Filtres Physico-Chimiques")
+        t_min, t_max = st.slider("Plage Tolérance (t)", 0.80, 1.10, (0.90, 1.05), step=0.01)
+        max_delta_chi = st.slider("Δχ max (Stabilité Redox)", 0.0, 3.0, 2.0, step=0.1)
+        min_stability = st.slider("Score Stabilité & Ordre Min", 0.0, 1.0, 0.4, step=0.05)
+        
+        st.markdown("---")
+        generate_btn = st.button("🚀 LANCER LE CRIBLAGE", type="primary", use_container_width=True)
 
     if generate_btn:
-        with st.spinner("⏳ Exécution du moteur vectorisé & calculs d'ordre B/B'..."):
+        with st.spinner("⏳ Exécution du moteur vectorisé..."):
             cn_A = config['cn_A']
             lattice_type = config['lattice']
             r_O = ELEMENT_DB["O"]["radii"][-2][6]
@@ -374,47 +392,35 @@ def main():
         config = st.session_state.config
         exec_time = st.session_state.get('exec_time', 0.0)
         
-        st.success(f"✅ **{len(df)}** combinaisons trouvées en **{exec_time:.4f} secondes** (Analyse d'ordre & géométrie incluses).")
+        st.success(f"✅ **{len(df)}** combinaisons trouvées en **{exec_time:.4f} secondes**.")
         
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
-            "📊 Données & Ordre B/B'", 
-            "📈 Visualisations 3D", 
-            "💾 Export Fichiers (CIF/POSCAR/QE)", 
-            "🤖 Export DeepXDE / ML", 
-            "📦 Archive ZIP Complète (DFT)"
+            "📊 Données & Ordre B/B'", "📈 Visualisations 3D", "💾 Export Fichiers (CIF/POSCAR/QE)", "🤖 Export DeepXDE / ML", "📦 Archive ZIP Complète (DFT)"
         ])
         
         with tab1:
             show_cols = ['Formule', 'Ox_A', 'Ox_B', 'Ox_Bp', 't', 'order_propensity', 'a_calc', 'b_calc', 'c_calc', 'stability_score', 'delta_chi']
-            st.dataframe(
-                df[show_cols],
-                use_container_width=True, 
-                hide_index=True,
+            st.dataframe(df[show_cols], use_container_width=True, hide_index=True,
                 column_config={
                     "t": st.column_config.ProgressColumn("Tolérance (t)", min_value=t_min, max_value=t_max, format="%.4f"),
-                    "order_propensity": st.column_config.ProgressColumn("Propension Ordre B/B'", min_value=0.0, max_value=1.0, format="%.3f"),
+                    "order_propensity": st.column_config.ProgressColumn("Ordre B/B'", min_value=0.0, max_value=1.0, format="%.3f"),
                     "stability_score": st.column_config.ProgressColumn("Score Global", min_value=0.0, max_value=1.0, format="%.3f"),
                     "a_calc": st.column_config.NumberColumn("a (Å)", format="%.4f"),
                     "b_calc": st.column_config.NumberColumn("b (Å)", format="%.4f"),
                     "c_calc": st.column_config.NumberColumn("c (Å)", format="%.4f"),
-                }
-            )
+                })
             
         with tab2:
             col1, col2 = st.columns(2)
             with col1:
-                fig1 = px.scatter(df, x="t", y="stability_score", color="order_propensity", 
-                                  title="Stabilité Globale vs Tolérance (Coloré par Ordre B/B')", template="plotly_dark",
-                                  hover_data=['Formule', 'a_calc'], color_continuous_scale=px.colors.sequential.Viridis)
+                fig1 = px.scatter(df, x="t", y="stability_score", color="order_propensity", title="Stabilité vs Tolérance", template="plotly_dark", hover_data=['Formule', 'a_calc'], color_continuous_scale=px.colors.sequential.Viridis)
                 st.plotly_chart(fig1, use_container_width=True)
             with col2:
-                fig2 = px.scatter_3d(df, x="a_calc", y="b_calc", z="c_calc", color="stability_score",
-                                     title="Espace des Paramètres de Maille", template="plotly_dark",
-                                     hover_data=['Formule'], color_continuous_scale=px.colors.sequential.Inferno)
+                fig2 = px.scatter_3d(df, x="a_calc", y="b_calc", z="c_calc", color="stability_score", title="Espace Paramètres de Maille", template="plotly_dark", hover_data=['Formule'], color_continuous_scale=px.colors.sequential.Inferno)
                 st.plotly_chart(fig2, use_container_width=True)
                 
         with tab3:
-            st.warning("⚠️ Fichiers d'entrée prêts pour DFT (Quantum ESPRESSO `.scf.in`, VASP `POSCAR`, et structure cristalline `.cif`).")
+            st.warning("⚠️ Fichiers d'entrée prêts pour DFT (QE `.scf.in`, VASP `POSCAR`, `.cif`).")
             cols_per_row = 3
             for i in range(0, len(df), cols_per_row):
                 cols = st.columns(cols_per_row)
@@ -424,30 +430,17 @@ def main():
                         with cols[j]:
                             st.markdown(f"**{row['Formule']}**")
                             c1, c2, c3 = st.columns(3)
-                            with c1:
-                                st.download_button("CIF", generate_cif(row, config['sg']), f"{row['Formule']}.cif", key=f"cif_{row['Formule']}_{i+j}")
-                            with c2:
-                                st.download_button("POSCAR", generate_poscar(row), f"POSCAR_{row['Formule']}", key=f"poscar_{row['Formule']}_{i+j}")
-                            with c3:
-                                st.download_button("QE.in", generate_qe_input(row), f"{row['Formule']}.scf.in", key=f"qe_{row['Formule']}_{i+j}")
+                            with c1: st.download_button("CIF", generate_cif(row, config['sg']), f"{row['Formule']}.cif", key=f"cif_{i+j}")
+                            with c2: st.download_button("POSCAR", generate_poscar(row), f"POSCAR_{row['Formule']}", key=f"poscar_{i+j}")
+                            with c3: st.download_button("QE.in", generate_qe_input(row), f"{row['Formule']}.scf.in", key=f"qe_{i+j}")
                                 
         with tab4:
-            st.subheader("🤖 Export de Descripteurs pour Machine Learning & DeepXDE (PINNs)")
-            st.markdown("Les descripteurs physiques extraits ci-dessous sont formatés pour alimenter des modèles de substitution par apprentissage automatique ou des réseaux de neurones informés par la physique (DeepXDE).")
-            
+            st.subheader("🤖 Export de Descripteurs (ML / DeepXDE)")
             ml_cols = ['Formule', 't', 'order_propensity', 'a_calc', 'b_calc', 'c_calc', 'beta_calc', 'stability_score', 'delta_chi', 'mean_atomic_mass', 'mean_chi', 'd_e(B)', 'd_e(Bp)']
             df_ml = df[ml_cols]
-            
             st.dataframe(df_ml, use_container_width=True, hide_index=True)
-            
             csv_data = df_ml.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="⬇️ Télécharger le jeu de données des descripteurs (CSV pour ML / DeepXDE)",
-                data=csv_data,
-                file_name=f"HTS_A2BBO6_ML_features_{config['sg']}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
+            st.download_button("⬇️ Télécharger CSV Descripteurs", csv_data, f"HTS_ML_features_{config['sg']}.csv", mime="text/csv", use_container_width=True)
             
         with tab5:
             zip_buffer = io.BytesIO()
@@ -457,18 +450,11 @@ def main():
                     zf.writestr(f"POSCAR/POSCAR_{row['Formule']}", generate_poscar(row))
                     zf.writestr(f"Quantum_ESPRESSO/{row['Formule']}.scf.in", generate_qe_input(row))
                 zf.writestr("Screening_Results_and_ML_Features.csv", df.to_csv(index=False))
-                
-            st.download_button(
-                label="⬇️ Télécharger l'archive complète (CIF + POSCAR + QE Inputs + CSV ML)",
-                data=zip_buffer.getvalue(),
-                file_name=f"HTS_A2BBO6_Complete_Archive_{config['sg']}.zip",
-                mime="application/zip",
-                use_container_width=True
-            )
+            st.download_button("⬇️ Archive Complète (ZIP)", zip_buffer.getvalue(), f"HTS_A2BBO6_Archive_{config['sg']}.zip", mime="application/zip", use_container_width=True)
             
     elif "df_results" in st.session_state and st.session_state.df_results.empty:
-        st.error("❌ Aucune combinaison ne satisfait vos critères stricts de stabilité et de géométrie.")
-        st.info("💡 **Conseils d'expert :**\n1. Le paramètre de maille par défaut s'ajuste automatiquement. Vérifiez vos filtres.\n2. Baissez le score minimal à 0.2 pour élargir la recherche aux métastables.\n3. Augmentez la marge ±Δa.")
+        st.error("❌ Aucune combinaison ne satisfait vos critères stricts.")
+        st.info("💡 **Conseils :**\n1. Le paramètre 'a' est auto-calculé. Si vide, baissez le Score Min (ex: 0.2).\n2. Élargissez la plage de Tolérance (t) ou le Δχ max.")
 
 if __name__ == "__main__":
     main()
